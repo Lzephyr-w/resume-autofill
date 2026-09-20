@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>网申填充模拟验收</title>
+  <style>
+    body { font: 14px/1.5 system-ui; margin: 24px; color: #17233d; }
+    section { border: 1px solid #d8e2dc; margin: 12px 0; padding: 12px; }
+    .form-item, .ant-form-item { display: grid; grid-template-columns: 130px 280px; gap: 8px; margin: 8px; }
+    input, select, textarea, [role=combobox] { border: 1px solid #aaa; min-height: 28px; padding: 4px; }
+    [role=listbox] { position: absolute; z-index: 2; background: white; border: 1px solid #aaa; margin-left: 138px; padding: 4px; }
+    [role=option] { cursor: pointer; padding: 4px 12px; }
+    #result.pass { color: #16794d; } #result.fail { color: #b42318; }
+  </style>
+</head>
+<body>
+  <h1>网申填充模拟验收</h1>
+  <p id="variant"></p>
+  <form id="form"></form>
+  <pre id="result">运行中…</pre>
+  <script>
+    const ui = new URLSearchParams(location.search).get("ui") || "native";
+    const component = ui === "component";
+    const misleading = ui === "phoenix-misleading";
+    const phoenix = ui === "phoenix" || misleading;
+    const item = (label, control) => component
+      ? `<div class="ant-form-item"><div class="ant-form-item-label"><label>${label}</label></div><div class="ant-form-item-control">${control}</div></div>`
+      : phoenix ? `<div class="form-item"><div class="form-item__label">${label}</div><div class="form-item__control">${control}</div></div>`
+      : `<label class="form-item"><span>${label}</span>${control}</label>`;
+    const select = (label, id, options, initial = "", searchable = false) => {
+      if (!component) return item(label, `<select id="${id}"><option value="">请选择</option>${options.map((x) => `<option${x === initial ? " selected" : ""}>${x}</option>`).join("")}</select>`);
+      if (searchable || id === "intentCity") return item(label, `<div class="phoenix-select"><input id="${id}" class="phoenix-select__input" role="combobox" tabindex="0" aria-expanded="false" value="${initial}"><div class="common-unmodeled-layer" role="listbox" hidden>${searchable ? '<input class="mock-select-search" placeholder="搜索">' : ""}<div data-lazy-scroll data-lazy-option="${(searchable && /掌握程度/.test(label) ? options.at(-2) : options[1]) || options[0]}" style="height:40px;overflow:auto"><div style="height:220px"><div ${id === "intentCity" ? "class=plain-choice" : "role=option"} data-search-result>${options[0]}</div></div></div></div><div class="plain-confirm" hidden><span>确定</span></div></div>`);
+      return item(label, `<div class="ant-select"><div id="${id}" role="combobox" tabindex="0" aria-expanded="false"><span class="ant-select-selection-item">${initial}</span></div><div class="common-unmodeled-layer" role="listbox" hidden>${options.map((x) => `<div role="option">${x}</div>`).join("")}</div></div>`);
+    };
+    const input = (label, id, value = "") => item(label, `<input id="${id}" value="${value}">`);
+    const month = (label, id) => phoenix
+      ? item(label, `<div class="phoenix-select phoenix-select--editable"><input id="${id}" class="phoenix-select__input" value=""></div>`)
+      : item(label, `<input id="${id}" type="month">`);
+    const radio = (label, name, options) => component
+      ? item(label, options.map((x) => `<label><input type="radio" name="${name}" value="${x}">${x}</label>`).join(""))
+      : `<fieldset class="form-item"><legend>${label}</legend><div>${options.map((x) => `<label><input type="radio" name="${name}" value="${x}">${x}</label>`).join("")}</div></fieldset>`;
+    // Phoenix rows on real recruitment pages can be deeply wrapped before
+    // becoming siblings; keep this regression fixture deeper than 8 levels.
+    const nestPhoenix = (body) => phoenix ? `${'<div class="deep-row">'.repeat(9)}${body}${'</div>'.repeat(9)}` : body;
+    const row = (kind, index) => `<div class="repeat-row" data-kind="${kind}">${nestPhoenix(
+      kind === "work" ? month("开始时间", `${kind}Start${index}`) + month("结束时间", `${kind}End${index}`) + select(index === 1 ? "月薪（税前）" : "税前月薪", `${kind}Salary${index}`, ["2001～4000", "8001～10000"], "", component && index === 2) + select(index === 1 ? "工作地点" : "办公地点", `${kind}City${index}`, ["广州", "深圳"]) + input("公司名称", `${kind}Company${index}`) + input("所在部门", `${kind}Department${index}`) + input("职位名称", `${kind}Title${index}`)
+      : kind === "project" ? input("项目名称", `${kind}Name${index}`) + input("职务", `${kind}Role${index}`) + month("开始时间", `${kind}Start${index}`) + month("结束时间", `${kind}End${index}`) + item("项目描述", `<textarea id="${kind}Description${index}"></textarea>`)
+      : kind === "cadre" ? input("职务", `${kind}Position${index}`) + item("工作职责", `<textarea id="${kind}Duty${index}"></textarea>`)
+      : kind === "skill" ? input("技能名称", `${kind}Name${index}`) + select("掌握程度", `${kind}Proficiency${index}`, ["了解", "一般", "熟练", "精通"], "", component) + input("使用时间总计", `${kind}Duration${index}`) + item("技能描述", `<textarea id="${kind}Description${index}"></textarea>`)
+      : kind === "language" ? input("语言类型", `${kind}Type${index}`) + input("掌握程度", `${kind}Proficiency${index}`) + input("听说", `${kind}Speaking${index}`) + input("读写", `${kind}Reading${index}`)
+      : kind === "certificate" ? input("证书名称", `${kind}Name${index}`) + input("成绩", `${kind}Score${index}`)
+      : input("获奖项", `${kind}Name${index}`)
+    )}</div>`;
+    const add = (kind, text) => phoenix ? `<div id="${kind}Rows_addButton" data-add="${kind}">${text}</div>` : `<button type="button" data-add="${kind}">${text}</button>`;
+    document.querySelector("#variant").textContent = component ? "组件库结构（ant-form-item + 自定义下拉）" : phoenix ? "智联 Phoenix 结构（月份面板 + div 新增按钮）" : "原生表单结构";
+    document.querySelector("#form").innerHTML = `
+      <section><h2>个人信息</h2>${input("姓名", "name", "页面已有姓名")}${input("手机号码", "phone")}${input("电子邮箱", "email")}${item("出生日期", '<input id="birthDate" type="date">')}${select("性别", "gender", ["男", "女"])}${radio("政治面貌", "politicalStatus", ["群众", "中共党员"])}${input("籍贯", "nativePlace")}${input("现居住地", "currentResidence")}${input("户口所在地", "householdRegistration")}</section>
+       <section><h2>求职意向</h2>${select("期望行业", "intentIndustry", ["制造业", "互联网/电子商务"], "", component)}${select("意向职位", "intentOccupation", ["前端开发", "产品经理"])}${select("目前月薪（税前）", "intentCurrentSalary", ["页面已有月薪", "7k"], "页面已有月薪")}${select("期望月薪（税前）", "intentExpectedSalary", ["2001～4000", "8001～10000"])}${select("期望工作地点", "intentCity", ["广州", "深圳"])}${component ? item("级联工作地点", '<div class="mock-cascade"><div id="cascadeCity" role="combobox" tabindex="0" aria-expanded="false"><span class="ant-select-selection-item"></span></div><div role="listbox" hidden><div role="option" data-cascade-parent>广东省</div></div><div class="plain-confirm" hidden><span>确定</span></div></div>') + item("可搜索级联地点", '<div class="mock-cascade"><div id="searchCascadeCity" role="combobox" tabindex="0" aria-expanded="false"><span class="ant-select-selection-item"></span></div><div role="listbox" hidden><input class="mock-location-search" placeholder="搜索"><div role="option">广东省</div></div><div class="plain-confirm" hidden><span>确定</span></div></div>') : ""}</section>
+       <section><h2>候选歧义回归</h2>${select("候选职业", "ambiguousOccupation", ["前端开发工程师", "前端开发实习生"])}</section>
+      <section><h2>教育经历</h2><div class="repeat-row">${input("学校名称", "school")}${select("学历", "degree", ["本科", "硕士"])}${month("教育开始时间", "educationStart")}${month("毕业年月", "educationEnd")}</div></section>
+      <section><h2>${misleading ? "其他模块" : "工作经历"}</h2><div id="workRows">${row("work", 1)}</div>${add("work", "添加工作经历")}</section>
+      <section><h2>${misleading ? "其他模块" : "项目经历"}</h2><div id="projectRows">${row("project", 1)}</div>${add("project", "添加项目经历")}</section>
+      <section><h2>学生干部经历</h2><div id="cadreRows">${row("cadre", 1)}</div><button type="button" data-add="cadre">添加干部经历</button></section>
+      <section><h2>技能</h2><div id="skillRows">${row("skill", 1)}</div>${add("skill", "添加技能")}</section>
+      <section><h2>语言能力</h2><div id="languageRows">${row("language", 1)}</div><button type="button" data-add="language">添加语言能力</button></section>
+      <section><h2>证书</h2><div id="certificateRows">${row("certificate", 1)}</div><button type="button" data-add="certificate">添加证书</button></section>
+       <section><h2>获奖经历</h2><div id="awardRows">${row("award", 1)}</div><button type="button" data-add="award">添加获奖经历</button></section>`;
+     const industryControl = document.querySelector("#intentIndustry");
+     const occupationControl = document.querySelector("#intentOccupation");
+     const occupationOptions = ["前端开发工程师", "产品经理"];
+     const updateOccupation = () => {
+       if (occupationControl.tagName === "SELECT") {
+         occupationControl.innerHTML = `<option value="">请选择</option>${occupationOptions.map((x) => `<option>${x}</option>`).join("")}`;
+         occupationControl.disabled = false;
+       } else {
+         occupationControl.setAttribute("aria-disabled", "false");
+         occupationControl.closest(".ant-select")?.querySelector("[role=listbox]")?.replaceChildren(...occupationOptions.map((x) => { const option = document.createElement("div"); option.setAttribute("role", "option"); option.textContent = x; return option; }));
+       }
+     };
+     if (occupationControl.tagName === "SELECT") occupationControl.disabled = true;
+     else occupationControl.setAttribute("aria-disabled", "true");
+     industryControl?.addEventListener("change", updateOccupation);
+    document.addEventListener("click", (event) => {
+      const combobox = event.target.closest("[role=combobox]");
+      if (combobox?.nextElementSibling?.getAttribute("role") === "listbox") { const list = combobox.nextElementSibling; const plainConfirm = combobox.closest(".phoenix-select, .mock-cascade")?.querySelector(".plain-confirm"); list.hidden = !list.hidden; if (plainConfirm) plainConfirm.hidden = list.hidden; combobox.setAttribute("aria-expanded", String(!list.hidden)); }
+      const picker = phoenix && event.target.closest(".phoenix-select__input");
+      if (picker && !document.querySelector(".phoenix-calendar-month-panel")) document.body.insertAdjacentHTML("beforeend", `<div class="phoenix-calendar-month-panel" data-for="${picker.id}" data-year="2026" style="position:fixed;left:20px;top:20px;background:white"><button class="phoenix-calendar-month-panel-prev-year-btn" type="button"></button><button class="phoenix-calendar-month-panel-year-select" type="button">2026</button><button class="phoenix-calendar-month-panel-next-year-btn" type="button"></button><div role="grid">${Array.from({length:12},(_,i)=>`<div role="gridcell">${i+1}月</div>`).join("")}</div></div>`);
+      const panelButton = event.target.closest(".phoenix-calendar-month-panel-prev-year-btn, .phoenix-calendar-month-panel-next-year-btn");
+      if (panelButton) { const panel = panelButton.closest(".phoenix-calendar-month-panel"); panel.dataset.year = String(Number(panel.dataset.year) + (panelButton.className.includes("prev") ? -1 : 1)); panel.querySelector(".phoenix-calendar-month-panel-year-select").textContent = panel.dataset.year; }
+      const monthCell = event.target.closest("[role=gridcell]");
+      if (monthCell) { const panel = monthCell.closest(".phoenix-calendar-month-panel"); const target = document.getElementById(panel.dataset.for); target.value = `${panel.dataset.year}-${String(parseInt(monthCell.textContent, 10)).padStart(2, "0")}`; target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true })); panel.remove(); }
+      const option = event.target.closest("[role=option], .plain-choice");
+       if (option) { const list = option.closest("[role=listbox]"); if (option.hasAttribute("data-cascade-parent")) list.replaceChildren(Object.assign(document.createElement("div"), { role: "option", textContent: "广州市" })); else { const applyOption = () => { const control = list?.previousElementSibling; if (control?.matches("input")) { control.value = option.textContent; control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } else if (control) { control.querySelector(".ant-select-selection-item").textContent = option.textContent; control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } if (list && !option.matches("[data-search-result]")) list.hidden = true; }; component ? setTimeout(applyOption, 220) : applyOption(); } }
+      const add = event.target.closest("[data-add]");
+      if (add) { const kind = add.dataset.add; const host = document.querySelector(`#${kind}Rows`); host.insertAdjacentHTML("beforeend", row(kind, host.children.length + 1)); }
+    });
+    document.addEventListener("input", (event) => {
+      const search = event.target.closest(".mock-select-search");
+       if (search) { const result = search.parentElement.querySelector("[data-search-result]"); result.textContent = search.value.trim() === "互联网" ? "互联网/电子商务" : search.value; result.dataset.searchUsed = "true"; }
+      const locationSearch = event.target.closest(".mock-location-search");
+      if (locationSearch) locationSearch.parentElement.querySelector("[role=option]").textContent = locationSearch.value.trim() === "广东省广州市" ? "广州市" : "广东省";
+    });
+    document.addEventListener("scroll", (event) => {
+      const lazy = event.target.closest?.("[data-lazy-scroll]");
+      if (lazy) lazy.querySelector("[data-search-result]").textContent = lazy.scrollTop ? lazy.dataset.lazyOption : "制造业";
+    }, true);
+    document.addEventListener("click", (event) => {
+      const confirm = event.target.closest(".plain-confirm");
+      if (confirm) { confirm.dataset.confirmed = "true"; confirm.parentElement.querySelector("[role=listbox]").hidden = true; confirm.hidden = true; }
+    });
+    const changed = new Set();
+    document.querySelector("#form").addEventListener("input", (event) => changed.add(`input:${event.target.id || event.target.name}`));
+    document.querySelector("#form").addEventListener("change", (event) => changed.add(`change:${event.target.id || event.target.name}`));
+    globalThis.__RESUME_AUTOFILL_TEST__ = true;
+  </script>
+  <script src="../content.js?v=option-ai-21"></script>
+  <script>
+    (async () => {
+      const experienceRows = [
+        { company: "甲公司", department: "研发部", title: "前端开发实习生", start: "2024-01", end: "2024-02", salary: "3500", location: "广州" },
+        { company: "乙公司", department: "产品部", title: "产品实习生", start: "2024-03", end: "2024-04", salary: "10000", location: "深圳" }
+      ];
+      const profile = {
+        name: "张三", phone: "13800138000", email: "test@example.com", birthDate: "2000-01-02", gender: "女", politicalStatus: "群众",
+        nativePlace: "广东省汕头市", currentResidence: "广东省广州市", householdRegistration: "广东省汕头市",
+        jobIntent: { industry: "互联网", occupation: "前端开发", currentSalary: "7k", expectedSalary: "3500", city: "深圳" },
+        education: [{ school: "测试大学", degree: "本科", start: "2020-09", end: "2024-06" }],
+        experiences: phoenix ? experienceRows : [],
+        work: phoenix ? [] : experienceRows,
+        internships: phoenix ? experienceRows : [],
+        projects: [{ name: "项目一", role: "开发", start: "2024-01", end: "2024-02", description: "项目摘要" }, { name: "非急救转运调度平台", role: "负责人", start: "2024-03", end: "2024-04", description: "项目说明" }, { name: "小A招新小程序", role: "开发", start: "2024-05", end: "2024-06", description: "项目说明" }],
+        cadres: [{ position: "班长", duty: "组织活动" }, { position: "部长", duty: "统筹工作" }],
+        skills: [{ name: "Vue3", proficiency: "熟悉", duration: "3年", description: "用于管理后台开发" }, { name: "React", proficiency: "熟练", duration: "2年", description: "用于组件化开发" }],
+        languages: [{ language: "英语", proficiency: "熟练", speaking: "熟练", reading: "熟练" }, { language: "日语", proficiency: "一般", speaking: "一般", reading: "一般" }],
+        certificates: [{ name: "CET-4", score: "520" }, { name: "CET-6", score: "510" }],
+        awards: [{ name: "一等奖" }, { name: "二等奖" }], customFields: {}, extras: {}
+      };
+       const initialSchema = globalThis.__resumeAutofillTest.formSchema();
+       const intentIndustry = initialSchema.find((field) => field.id === "intentIndustry");
+       const intentExpectedSalary = initialSchema.find((field) => field.id === "intentExpectedSalary");
+       const intentCity = initialSchema.find((field) => field.id === "intentCity");
+       const politicalStatus = initialSchema.find((field) => /政治面貌/.test(field.label));
+       const liveSchema = await globalThis.__resumeAutofillTest.liveOptions([intentIndustry.key, intentExpectedSalary.key, intentCity.key, politicalStatus.key]);
+       const liveIndustryOptions = liveSchema.find((field) => field.key === intentIndustry.key)?.options || [];
+       const liveSalaryOptions = liveSchema.find((field) => field.key === intentExpectedSalary.key)?.options || [];
+       const liveCityOptions = liveSchema.find((field) => field.key === intentCity.key)?.options || [];
+       const livePoliticalOptions = liveSchema.find((field) => field.key === politicalStatus.key)?.options || [];
+       document.querySelector("[data-add=work]")?.click();
+       const workLocationFields = globalThis.__resumeAutofillTest.formSchema().filter((field) => /^workCity[12]$/.test(field.id));
+       const liveWorkLocationSchema = await globalThis.__resumeAutofillTest.liveOptions(workLocationFields.map((field) => field.key));
+       const liveWorkLocationOptions = liveWorkLocationSchema.filter((field) => /^workCity[12]$/.test(field.id)).map((field) => field.options || []);
+       const radioUntouched = !document.querySelector('[name=politicalStatus]:checked');
+       const semanticIndustry = await globalThis.__resumeAutofillTest.applyAssignments([{ key: intentIndustry.key, index: intentIndustry.index, label: intentIndustry.label, value: "互联网", confidence: 0.9 }]);
+       const occupationBeforeFill = globalThis.__resumeAutofillTest.formSchema().find((field) => field.id === "intentOccupation");
+       const liveOccupationSchema = occupationBeforeFill ? await globalThis.__resumeAutofillTest.liveOptions([occupationBeforeFill.key]) : [];
+       const liveOccupationOptions = liveOccupationSchema.find((field) => field.key === occupationBeforeFill?.key)?.options || [];
+       const report = await globalThis.__resumeAutofillTest.fill(profile, { onlyEmpty: true });
+       const text = (id) => { const element = document.getElementById(id); return !element ? "" : element.tagName === "SELECT" ? element.value : element.value || element.textContent.trim(); };
+       const deferredDateIds = ["birthDate", "educationStart", "educationEnd", "workStart1", "workEnd2"];
+       deferredDateIds.forEach((id) => { const element = document.getElementById(id); if (element) element.value = ""; });
+       const deferredDateReport = await globalThis.__resumeAutofillTest.fill(profile, { onlyEmpty: true, deferChoices: true });
+       const deferredDatesFilled = text("birthDate") === profile.birthDate && text("educationStart") === "2020-09" && text("educationEnd") === "2024-06" && text("workStart1") === "2024-01" && text("workEnd2") === "2024-04";
+       const cascadeField = globalThis.__resumeAutofillTest.formSchema().find((field) => field.id === "cascadeCity");
+       const cascadeParent = cascadeField && await globalThis.__resumeAutofillTest.applyAssignments([{ key: cascadeField.key, index: cascadeField.index, label: cascadeField.label, value: "广东省", confidence: 1, deferConfirm: true }]);
+       const cascadeChildren = cascadeField && await globalThis.__resumeAutofillTest.liveOptions([cascadeField.key], true);
+       const cascadeOptions = cascadeChildren?.find((field) => field.key === cascadeField.key)?.options || [];
+       const cascadeFinal = cascadeField && await globalThis.__resumeAutofillTest.applyAssignments([{ key: cascadeField.key, index: cascadeField.index, label: cascadeField.label, value: "广州市", confidence: 1 }]);
+       const searchCascadeField = globalThis.__resumeAutofillTest.formSchema().find((field) => field.id === "searchCascadeCity");
+       const searchCascade = searchCascadeField && await globalThis.__resumeAutofillTest.applyAssignments([{ key: searchCascadeField.key, index: searchCascadeField.index, label: searchCascadeField.label, value: "广东省", sourceValue: "广东省广州市", confidence: 1, deferConfirm: true }]);
+       const ambiguous = globalThis.__resumeAutofillTest.formSchema().find((field) => field.id === "ambiguousOccupation");
+       const ambiguousReport = ambiguous && await globalThis.__resumeAutofillTest.applyAssignments([{ key: ambiguous.key, index: ambiguous.index, label: ambiguous.label, value: "前端开发", confidence: 0.9 }]);
+      const checks = [
+        ["保留已有值", text("name") === "页面已有姓名"], ["手机号", text("phone") === profile.phone],
+        ["三个地区不混填", text("nativePlace") === profile.nativePlace && text("currentResidence") === profile.currentResidence && text("householdRegistration") === profile.householdRegistration],
+        ["日期与单选", text("birthDate") === "2000-01-02" && document.querySelector('[name=politicalStatus]:checked')?.value === "群众"],
+        ["下拉控件", text("gender") === "女" && text("degree") === "本科"],
+         ["求职意向候选匹配", text("intentIndustry") === "互联网/电子商务" && text("intentOccupation") === "前端开发工程师" && text("intentExpectedSalary") === "2001～4000" && text("intentCity") === "深圳"],
+         ["求职意向级联候选", liveOccupationOptions.includes("前端开发工程师") && text("intentOccupation") === "前端开发工程师"],
+        ["惰性弹层实际点选", !component || document.querySelector("#intentCity")?.value === "深圳"],
+        ["结构化诊断", report.diagnostics?.intentSources?.["期望从事行业"] && report.diagnostics?.educationEndSources?.[0] && report.diagnostics?.experienceSalarySources?.every(Boolean) && report.diagnostics?.experienceLocationSources?.every(Boolean) && report.diagnostics?.structuredAttempts?.some((item) => item.section === "工作经历" && item.row === 2 && item.label === "月薪(税前)" && item.reason === "filled" && item.targetIndex >= 0)],
+        ["求职意向已有值保护", text("intentCurrentSalary") === "页面已有月薪"],
+        ["教育起止月份不串填", text("educationStart") === "2020-09" && text("educationEnd") === "2024-06"],
+        ["AI 阶段日期仍结构化填充", deferredDateReport.filled > 0 && deferredDatesFilled],
+        ["输入与校验事件", changed.has("input:phone") && changed.has("change:phone")],
+        ["组件下拉校验事件", !component || changed.has("change:intentIndustry")],
+        ["组件弹层搜索", !component || document.querySelector("[data-search-result]")?.dataset.searchUsed === "true"],
+        ["Phoenix 确认控件", !component || document.querySelector(".plain-confirm")?.dataset.confirmed === "true"],
+        ["级联父子候选与最终确认", !component || cascadeParent?.diagnostics?.[0]?.reason === "cascade-parent-selected" && cascadeOptions.includes("广州市") && cascadeFinal?.filled === 1 && text("cascadeCity") === "广州市"],
+        ["搜索型级联直达子级", !component || searchCascade?.filled === 1 && text("searchCascadeCity") === "广州市"],
+         ["实时选择候选", liveIndustryOptions.includes("互联网/电子商务") && liveSalaryOptions.includes("2001～4000") && liveCityOptions.includes("深圳") && livePoliticalOptions.includes("群众") && radioUntouched],
+         ["经历地点实时候选", liveWorkLocationOptions.length === 2 && liveWorkLocationOptions.every((options) => options.includes("广州") && options.includes("深圳"))],
+         ["本地值语义规范化", semanticIndustry.filled === 1 && text("intentIndustry") === "互联网/电子商务"],
+         ["候选歧义保持为空", ambiguousReport?.filled === 0 && text("ambiguousOccupation") === ""],
+        ["工作经历扩行", document.querySelectorAll("#workRows .repeat-row").length === 2 && text("workCompany2") === "乙公司"],
+        ["工作月份", !phoenix || text("workStart1") === "2024-01" && text("workEnd2") === "2024-04"],
+        ["经历薪资地点按行填充", text("workSalary1") === "2001～4000" && text("workCity1") === "广州" && text("workSalary2") === "8001～10000" && text("workCity2") === "深圳"],
+        ["项目扩行", document.querySelectorAll("#projectRows .repeat-row").length === 3 && text("projectName2") === "非急救转运调度平台" && text("projectEnd2") === "2024-04" && text("projectName3") === "小A招新小程序" && text("projectEnd3") === "2024-06"],
+        ["干部扩行", document.querySelectorAll("#cadreRows .repeat-row").length === 2 && text("cadrePosition2") === "部长"],
+        ["技能扩行", document.querySelectorAll("#skillRows .repeat-row").length === 2 && text("skillName1") === "Vue3" && text("skillName2") === "React" && text("skillDescription2") === "用于组件化开发"],
+        ["技能等级候选映射", text("skillProficiency1") === "熟练" && text("skillProficiency2") === "熟练"],
+        ["语言扩行", document.querySelectorAll("#languageRows .repeat-row").length === 2 && text("languageType2") === "日语" && text("languageReading2") === "一般"],
+        ["证书扩行", document.querySelectorAll("#certificateRows .repeat-row").length === 2 && text("certificateName2") === "CET-6"],
+        ["获奖扩行", document.querySelectorAll("#awardRows .repeat-row").length === 2 && text("awardName2") === "二等奖"]
+      ];
+      const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
+      const output = document.querySelector("#result");
+      output.className = failed.length ? "fail" : "pass";
+      output.textContent = `${failed.length ? "FAIL" : "PASS"} ${ui}\n${checks.map(([name, ok]) => `${ok ? "✓" : "✗"} ${name}`).join("\n")}\nLIVE=${JSON.stringify({ industry: liveIndustryOptions, salary: liveSalaryOptions, city: liveCityOptions, political: livePoliticalOptions, workLocations: liveWorkLocationOptions })}\n${JSON.stringify({ liveCandidates: { industry: liveIndustryOptions, salary: liveSalaryOptions, city: liveCityOptions, political: livePoliticalOptions, workLocations: liveWorkLocationOptions }, report }, null, 2)}`;
+    })().catch((error) => { const output = document.querySelector("#result"); output.className = "fail"; output.textContent = `FAIL\n${error.stack || error}`; });
+  </script>
+</body>
+</html>

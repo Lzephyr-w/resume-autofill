@@ -1,0 +1,36 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+
+const source = fs.readFileSync(require.resolve("../popup.js"), "utf8");
+const helpers = source.slice(source.indexOf("function fieldLabel"), source.indexOf("const missingLocalValue"));
+const { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions } = Function(`${helpers}; return { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions };`)();
+
+const result = missingFieldLabels(["民族", "期望工作城市"], [{ label: "期望工作城市" }]);
+assert.deepEqual(result, { unresolved: ["期望工作城市"], unavailable: ["民族"] });
+assert.equal(uniqueEmptyFields([{ key: "page::工作地点::text::0", label: "工作地点", module: "", repeatIndex: 0 }, { key: "page::工作地点::text::1", label: "工作地点", module: "", repeatIndex: 0 }]).length, 2);
+assert.deepEqual(aiFieldContext({ label: "培训机构", module: "培训经历", repeatIndex: 0 }, { jobIntent: { city: "广州" } }), {});
+assert.deepEqual(fieldsWithLiveOptions([{ type: "text", optionSource: "popup", options: ["计算机软件"] }, { type: "radio", optionSource: "radio", options: [] }]), [{ type: "text", optionSource: "popup", options: ["计算机软件"] }]);
+assert.equal(hasProfileContext({ label: "培训地点", module: "培训经历", repeatIndex: 0 }, { jobIntent: { city: "广州" } }), false);
+assert.equal(hasProfileContext({ label: "期望工作城市", module: "求职意向" }, { jobIntent: { city: "广州" } }), true);
+const candidateProfile = { jobIntent: { industry: "互联网", occupation: "前端开发", expectedSalary: "3500", city: "广州市" }, work: [{ location: "广州市" }, { location: "深圳市" }] };
+assert.equal(localCandidate({ label: "期望从事行业", options: ["制造业", "互联网/电子商务"] }, candidateProfile), "互联网/电子商务");
+assert.equal(localCandidate({ label: "期望从事行业", options: ["制造业", "互联网/电子商务"] }, { jobIntent: { industry: "互联网行业" } }), "互联网/电子商务");
+assert.equal(localCandidate({ label: "期望从事职业", options: ["Java开发工程师", "Web前端开发工程师"] }, { jobIntent: { occupation: "前端工程" } }), "Web前端开发工程师");
+assert.equal(localCandidate({ label: "期望月薪(税前)", options: ["2001～4000", "8001～10000"] }, candidateProfile), "2001～4000");
+assert.equal(localCandidate({ label: "工作地点", module: "工作经历", repeatIndex: 1, options: ["广州", "深圳"] }, candidateProfile), "深圳");
+assert.equal(aiFieldContext({ label: "工作地点", module: "", repeatIndex: 0, occurrence: 1 }, candidateProfile).experience.location, "深圳市");
+assert.equal(localCandidate({ label: "期望从事职业", options: ["前端开发工程师", "前端开发实习生"] }, candidateProfile), "");
+assert.deepEqual(localCandidateAssignments([{ key: "city", index: 2, label: "期望工作城市", options: ["广州", "深圳"] }], candidateProfile), [{ key: "city", index: 2, label: "期望工作城市", value: "广州", confidence: 1 }]);
+assert.deepEqual(cascadeChildOptions(["广东省", "广州市", "深圳市"], new Set(["广东省"])), ["广州市", "深圳市"]);
+assert.deepEqual([...retryFieldKeys([{ key: "city", optionSource: "popup", options: [] }], 1)], ["city"]);
+assert.deepEqual([...retryFieldKeys([], 0)], []);
+assert.doesNotMatch(source, /forceMatch/);
+assert.match(source, /body: JSON\.stringify\(\{ profile, fields: aiFields \}\)/);
+assert.match(source, /const liveFields = fieldsWithLiveOptions\(scannedFields\)/);
+assert.match(source, /cascade-parent-selected/);
+assert.match(source, /keepOpen: true/);
+assert.match(source, /for \(const assignment of cascadeAssignments\)/);
+assert.match(source, /keys: \[assignment\.key\], keepOpen: true/);
+assert.match(source, /sourceValue: fieldFor\(assignment\)\?\.profileContext\?\.sourceValue/);
+assert.match(source, /\["ai-no-assignment", "not-a-page-option", "candidate-not-read", "options-unavailable"\]/);
+console.log("PASS popup diagnostics");

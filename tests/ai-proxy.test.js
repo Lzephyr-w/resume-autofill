@@ -1,0 +1,23 @@
+const assert = require("node:assert/strict");
+const { parseModelJson, sanitizeAssignments, assignmentResults, unsupportedResponseFormat } = require("../ai-proxy/server.js");
+
+assert.deepEqual(parseModelJson('```json\n{"assignments":[]}\n```'), { assignments: [] });
+assert.equal(unsupportedResponseFormat({ error: { message: "This response_format type is unavailable now" } }), true);
+assert.equal(unsupportedResponseFormat({ error: { message: "missing or invalid API key" } }), false);
+const rangeField = { key: "salary", index: 0, label: "期望月薪", options: ["2001～4000", "4001～6000"] };
+assert.deepEqual(sanitizeAssignments({ assignments: [{ key: "salary", index: 0, label: "期望月薪", value: "3500", confidence: 0.9 }] }, [rangeField]), []);
+assert.equal(sanitizeAssignments({ assignments: [{ key: "salary", index: 0, label: "期望月薪", value: "2001～4000", confidence: 0.9 }] }, [rangeField])[0].value, "2001～4000");
+const semanticField = { key: "industry", index: 0, label: "期望从事行业", options: ["互联网/电子商务", "机械制造"] };
+assert.equal(sanitizeAssignments({ assignments: [{ key: "industry", index: 0, label: "期望从事行业", value: "互联网", confidence: 0.9 }] }, [semanticField])[0].value, "互联网/电子商务");
+assert.deepEqual(sanitizeAssignments({ assignments: [{ key: "industry", index: 0, label: "期望从事行业", value: "互联网金融", confidence: 0.9 }] }, [semanticField]), []);
+const ambiguousField = { key: "job", index: 0, label: "期望从事职业", options: ["前端开发工程师", "前端开发实习生"] };
+assert.deepEqual(sanitizeAssignments({ assignments: [{ key: "job", index: 0, label: "期望从事职业", value: "前端开发", confidence: 0.9 }] }, [ambiguousField]), []);
+assert.equal(assignmentResults({ assignments: [{ key: "job", index: 0, label: "期望从事职业", value: "前端开发", confidence: 0.9 }] }, [ambiguousField])[0].reason, "not-a-page-option");
+assert.equal(sanitizeAssignments({ assignments: [{ key: "city", index: 0, label: "期望工作城市", value: "深圳", confidence: 0.7 }] }, [{ key: "city", index: 0, label: "期望工作城市", options: ["广州", "深圳"] }])[0].value, "深圳");
+assert.equal(assignmentResults({ assignments: [{ key: "city", index: 0, label: "期望工作城市", value: "深圳", confidence: 0.6 }] }, [{ key: "city", index: 0, label: "期望工作城市", options: ["广州", "深圳"] }])[0].reason, "accepted");
+assert.equal(assignmentResults({ assignments: [] }, [{ key: "city", index: 0, label: "期望工作城市", options: ["广州", "深圳"] }])[0].reason, "ai-no-assignment");
+const unreadChoice = { key: "city", index: 0, type: "combobox", label: "期望城市", optionSource: "popup-not-found", options: [] };
+assert.equal(assignmentResults({ assignments: [{ key: "city", index: 0, label: "期望城市", value: "深圳", confidence: 0.9 }] }, [unreadChoice])[0].reason, "candidate-not-read");
+const proficiencyField = { key: "skill", index: 0, label: "掌握程度", options: ["了解", "一般", "熟练", "精通"] };
+assert.equal(sanitizeAssignments({ assignments: [{ key: "skill", index: 0, label: "掌握程度", value: "熟悉", confidence: 0.9 }] }, [proficiencyField])[0].value, "熟练");
+console.log("PASS ai-proxy compatibility");

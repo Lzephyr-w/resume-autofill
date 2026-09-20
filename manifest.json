@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "简历自动填充助手",
+  "version": "0.9.5",
+  "description": "手动维护本地网申档案，并使用 AI 匹配填充网页表单。",
+  "permissions": ["storage", "sidePanel", "webNavigation"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": { "default_icon": "icons/resume-autofill.png" },
+  "icons": { "128": "icons/resume-autofill.png" },
+  "side_panel": { "default_path": "popup.html" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>简历自动填充</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div class="eyebrow">VIVO CAMPUS TOOLKIT</div>
+      <div class="hero-row">
+        <div><h1>简历自动填充</h1><p>把简历信息带到招聘表单，省下重复填写的时间。</p></div>
+        <span class="hero-mark" aria-hidden="true">↗</span>
+      </div>
+      <div class="privacy-note"><span class="dot"></span>仅保存在本机 · 填充后请人工检查</div>
+    </header>
+
+    <section class="card config-card">
+      <div class="section-heading">
+        <span class="step">01</span>
+        <div><h2>AI 配置</h2><p>只保存在本机，用于连接本地代理</p></div>
+      </div>
+      <label class="config-field">API Key<input id="apiKey" type="password" autocomplete="off" placeholder="输入网关 API Key"></label>
+      <label class="config-field">Base URL<input id="baseUrl" type="url" placeholder="http://localhost:62139/v1"></label>
+      <label class="config-field">模型名<input id="model" type="text" placeholder="gpt-5.6-luna"></label>
+      <button id="connect" class="connect" type="button">保存配置并连接</button>
+      <div id="connect-status" class="action-status" role="status" aria-live="polite"></div>
+    </section>
+
+    <details class="card manual-card">
+      <summary>
+        <span class="step">02</span>
+        <span><strong>手动填写网申资料</strong><small>可折叠 · 支持本地保存和导入导出</small></span>
+        <span class="summary-arrow" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="manual-form-body">
+      <form id="applicationForm">
+      <section>
+        <h2><span aria-hidden="true">👤</span>基本信息</h2>
+        <div class="form-grid">
+          <label><span>姓名 <b>*</b></span><input id="fullName" type="text" autocomplete="name" placeholder="例如：张明"></label>
+          <label>性别<select id="gender"><option value="">请选择</option><option>男</option><option>女</option><option>其他</option></select></label>
+          <label><span>手机号码 <b>*</b></span><input id="phone" type="tel" autocomplete="tel" placeholder="例如：13800138000"></label>
+          <label><span>电子邮箱 <b>*</b></span><input id="email" type="email" autocomplete="email" placeholder="例如：zhangming@example.com"></label>
+          <label>出生日期<input id="birthDate" type="date"></label>
+          <label>证件类型<select id="idType"><option value="">请选择</option><option>身份证</option><option>护照</option><option>港澳通行证</option><option>台胞证</option><option>其他</option></select></label>
+          <label>证件号码<input id="idNumber" type="text" placeholder="请输入证件号码"></label>
+          <label>籍贯<input id="nativePlace" type="text" placeholder="例如：浙江杭州"></label>
+          <label>微信号<input id="wechat" type="text" placeholder="请输入微信号"></label>
+          <label>民族<input id="nationality" type="text" placeholder="例如：汉族"></label>
+          <label>政治面貌<input id="politicalStatus" type="text" placeholder="例如：群众"></label>
+          <label>现居住地<input id="currentResidence" type="text" placeholder="例如：广东省广州市"></label>
+          <label>户口所在地<input id="householdRegistration" type="text" placeholder="例如：广东省汕头市"></label>
+        </div>
+      </section>
+
+      <section>
+        <h2><span aria-hidden="true">🎓</span>教育背景</h2>
+        <div class="experience">
+          <strong>教育经历 1</strong>
+          <div class="form-grid">
+          <label>最高学历<select id="education"><option value="">请选择</option><option>高中及以下</option><option>大专</option><option>本科</option><option>硕士</option><option>博士</option></select></label>
+          <label>受教育类型<select id="educationType"><option value="">请选择</option><option>全日制</option><option>非全日制</option><option>在职</option><option>网络教育</option><option>其他</option></select></label>
+          <label>毕业院校<input id="university" type="text" placeholder="例如：清华大学"></label>
+          <label>学院<input id="college" type="text" placeholder="例如：计算机学院"></label>
+          <label>专业<input id="major" type="text" placeholder="例如：计算机科学与技术"></label>
+          <label>入学时间<input id="educationStart" type="text" placeholder="例如：2021-09"></label>
+          <label>毕业年份<input id="graduationYear" type="text" inputmode="numeric" placeholder="例如：2025"></label>
+          <label>GPA<input id="gpa" type="text" placeholder="例如：3.8/4.0 或 90/100"></label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2><span aria-hidden="true">🎯</span>求职意向</h2>
+        <div class="form-grid">
+          <label>期望从事行业<input id="intentIndustry" type="text" placeholder="例如：互联网/计算机软件"></label>
+          <label>期望从事职业<input id="intentOccupation" type="text" placeholder="例如：前端开发工程师"></label>
+          <label>现月薪(税前)<input id="intentCurrentSalary" type="text" placeholder="例如：8k"></label>
+          <label>期望月薪(税前)<input id="intentExpectedSalary" type="text" placeholder="例如：10k-15k"></label>
+          <label>期望工作城市<input id="intentCity" type="text" placeholder="例如：广州市"></label>
+          <label>到岗时间<input id="intentArrival" type="text" placeholder="例如：两周内"></label>
+        </div>
+      </section>
+
+      <section>
+        <h2><span aria-hidden="true">💼</span>实习/工作经历</h2>
+        <div class="experience">
+          <strong>经历 1</strong>
+          <div class="form-grid">
+            <label>公司名称<input id="internCompany1" type="text" placeholder="例如：字节跳动"></label>
+            <label>部门<input id="internDepartment1" type="text" placeholder="例如：研发部"></label>
+            <label>职位<input id="internPosition1" type="text" placeholder="例如：后端开发实习生"></label>
+            <label>开始时间<input id="internStart1" type="text" placeholder="例如：2024-06"></label>
+            <label>结束时间<input id="internEnd1" type="text" placeholder="例如：2024-09"></label>
+            <label>月薪(税前)<input id="internSalary1" type="text" placeholder="例如：4k"></label>
+            <label>工作地点<input id="internLocation1" type="text" placeholder="例如：广州市"></label>
+            <label>离职原因<input id="internReason1" type="text" placeholder="例如：实习结束"></label>
+            <label class="wide">工作内容<textarea id="internContent1" placeholder="描述你的工作职责与成果…"></textarea></label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2><span aria-hidden="true">📁</span>项目经历</h2>
+        <div class="experience">
+          <strong>项目 1</strong>
+          <div class="form-grid">
+            <label>项目名称<input id="projectName1" type="text" placeholder="例如：校园二手交易平台"></label>
+            <label>职务<input id="projectRole1" type="text" placeholder="例如：核心开发"></label>
+            <label>开始时间<input id="projectStart1" type="text" placeholder="例如：2023-09"></label>
+            <label>结束时间<input id="projectEnd1" type="text" placeholder="例如：2024-01"></label>
+            <label class="wide">项目描述<textarea id="projectDesc1" placeholder="项目背景、目标等…"></textarea></label>
+            <label class="wide">职责<textarea id="projectDuty1" placeholder="你负责的具体工作…"></textarea></label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2><span aria-hidden="true">🏛️</span>学生干部经历</h2>
+        <div class="experience">
+          <strong>干部经历 1</strong>
+          <div class="form-grid">
+            <label>职务<input id="cadrePosition1" type="text" placeholder="例如：学生会副主席"></label>
+            <label>级别<select id="cadreLevel1"><option value="">请选择</option><option>校级</option><option>院级</option><option>班级</option><option>社团</option><option>其他</option></select></label>
+            <label>开始时间<input id="cadreStart1" type="text" placeholder="例如：2023-09"></label>
+            <label>结束时间<input id="cadreEnd1" type="text" placeholder="例如：2024-06"></label>
+            <label class="wide">工作职责<textarea id="cadreDuty1" placeholder="描述你的主要工作…"></textarea></label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2><span aria-hidden="true">🌐</span>语言能力</h2>
+        <div class="experience">
+          <strong>语言能力 1</strong>
+          <div class="form-grid">
+            <label>语言<input id="languageType1" type="text" placeholder="例如：英语"></label>
+            <label>掌握程度<input id="languageProficiency1" type="text" placeholder="例如：熟练"></label>
+            <label>听说<input id="languageSpeaking1" type="text" placeholder="例如：熟练"></label>
+            <label>读写<input id="languageReading1" type="text" placeholder="例如：熟练"></label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2><span aria-hidden="true">📜</span>证书</h2>
+        <div class="experience">
+          <strong>证书 1</strong>
+          <div class="form-grid">
+            <label>证书名称<input id="languageCert1" type="text" placeholder="例如：CET-6"></label>
+            <label>分数<input id="languageScore1" type="text" placeholder="例如：580"></label>
+            <label>获得时间<input id="languageDate1" type="text" placeholder="例如：2023-12"></label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2><span aria-hidden="true">🏆</span>竞赛/获奖经历</h2>
+        <div class="experience">
+          <strong>获奖 1</strong>
+          <div class="form-grid">
+            <label>名称<input id="awardName1" type="text" placeholder="例如：全国大学生数学建模竞赛"></label>
+            <label>级别<select id="awardLevel1"><option value="">请选择</option><option>国家级</option><option>省级</option><option>市级</option><option>校级</option><option>院级</option><option>其他</option></select></label>
+            <label>获得时间<input id="awardDate1" type="text" placeholder="例如：2024-05"></label>
+            <label class="wide">描述<textarea id="awardDesc1" placeholder="获奖情况、排名等…"></textarea></label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2><span aria-hidden="true">📌</span>其他信息</h2>
+        <div class="form-grid">
+          <label class="wide">技能<textarea id="skills" placeholder="可粘贴技能清单或分条描述；AI 会按明确条目分别填充"></textarea></label>
+          <label class="wide">自我评价<textarea id="selfEvaluation" placeholder="简短描述你的优势、职业特质等"></textarea></label>
+        </div>
+      </section>
+
+      <div class="button-bar">
+        <button id="saveLocalBtn" class="primary" type="button">💾 保存到本地</button>
+        <button id="loadLocalBtn" type="button">📂 读取本地</button>
+        <button id="exportBtn" type="button">📤 导出文件</button>
+        <label class="file-button" for="importFile">📥 导入文件<input id="importFile" type="file" accept=".json,application/json"></label>
+      </div>
+      <div id="manual-status" class="action-status" role="status" aria-live="polite"></div>
+    </form>
+      </div>
+    </details>
+
+    <section class="card actions-card">
+      <div class="section-heading">
+        <span class="step">03</span>
+        <div><h2>开始操作</h2><p>使用手动表单资料智能匹配当前页面</p></div>
+      </div>
+      <div class="actions">
+        <button id="ai" class="ai" type="button"><span>✦</span>AI 匹配填充</button>
+      </div>
+      <div class="action-statuses">
+        <div id="ai-status" class="action-status" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="preview-card">
+      <div class="preview-heading"><span>档案预览</span><span class="preview-badge">本地</span></div>
+      <pre id="preview"></pre>
+    </section>
+    <div id="status" role="status" aria-live="polite"></div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
