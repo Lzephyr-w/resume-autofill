@@ -13,6 +13,9 @@ assert.deepEqual(sanitizeAssignments({ assignments: [{ key: "industry", index: 0
 const ambiguousField = { key: "job", index: 0, label: "期望从事职业", options: ["前端开发工程师", "前端开发实习生"] };
 assert.deepEqual(sanitizeAssignments({ assignments: [{ key: "job", index: 0, label: "期望从事职业", value: "前端开发", confidence: 0.9 }] }, [ambiguousField]), []);
 assert.equal(assignmentResults({ assignments: [{ key: "job", index: 0, label: "期望从事职业", value: "前端开发", confidence: 0.9 }] }, [ambiguousField])[0].reason, "not-a-page-option");
+const pageCandidateField = { key: "city", index: 0, label: "期望工作城市", type: "combobox", optionSource: "popup", options: ["广州市", "深圳市"] };
+assert.equal(sanitizeAssignments({ assignments: [{ key: "city", index: 0, label: "期望工作城市", value: "深圳市", confidence: 0.9 }] }, [pageCandidateField])[0].value, "深圳市");
+assert.equal(assignmentResults({ assignments: [{ key: "city", index: 0, label: "期望工作城市", value: "珠海市", confidence: 0.9 }] }, [pageCandidateField])[0].reason, "not-a-page-option");
 assert.equal(sanitizeAssignments({ assignments: [{ key: "city", index: 0, label: "期望工作城市", value: "深圳", confidence: 0.7 }] }, [{ key: "city", index: 0, label: "期望工作城市", options: ["广州", "深圳"] }])[0].value, "深圳");
 assert.equal(assignmentResults({ assignments: [{ key: "city", index: 0, label: "期望工作城市", value: "深圳", confidence: 0.6 }] }, [{ key: "city", index: 0, label: "期望工作城市", options: ["广州", "深圳"] }])[0].reason, "accepted");
 assert.equal(assignmentResults({ assignments: [] }, [{ key: "city", index: 0, label: "期望工作城市", options: ["广州", "深圳"] }])[0].reason, "ai-no-assignment");
@@ -20,4 +23,8 @@ const unreadChoice = { key: "city", index: 0, type: "combobox", label: "期望�
 assert.equal(assignmentResults({ assignments: [{ key: "city", index: 0, label: "期望城市", value: "深圳", confidence: 0.9 }] }, [unreadChoice])[0].reason, "candidate-not-read");
 const proficiencyField = { key: "skill", index: 0, label: "掌握程度", options: ["了解", "一般", "熟练", "精通"] };
 assert.equal(sanitizeAssignments({ assignments: [{ key: "skill", index: 0, label: "掌握程度", value: "熟悉", confidence: 0.9 }] }, [proficiencyField])[0].value, "熟练");
+const speakingField = { key: "speaking", index: 0, label: "听说", options: ["一般", "良好", "熟练", "精通"] };
+assert.equal(sanitizeAssignments({ assignments: [{ key: "speaking", index: 0, label: "听说", value: "熟悉", confidence: 0.9 }] }, [speakingField])[0].value, "熟练");
+assert.equal(assignmentResults({ assignments: [{ key: "speaking", index: 0, label: "听说", value: "母语", confidence: 0.9 }] }, [speakingField])[0].reason, "not-a-page-option");
+assert.deepEqual(sanitizeAssignments({ assignments: [{ key: "speaking", index: 0, label: "听说", value: "掌握", confidence: 0.9 }] }, [{ ...speakingField, options: ["熟练", "熟悉"] }]), []);
 console.log("PASS ai-proxy compatibility");

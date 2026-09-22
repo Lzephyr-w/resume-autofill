@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "简历自动填充助手",
-  "version": "0.9.5",
+  "version": "0.9.12",
   "description": "手动维护本地网申档案，并使用 AI 匹配填充网页表单。",
   "permissions": ["storage", "sidePanel", "webNavigation"],
   "host_permissions": [

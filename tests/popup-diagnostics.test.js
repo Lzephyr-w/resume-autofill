@@ -2,14 +2,21 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 
 const source = fs.readFileSync(require.resolve("../popup.js"), "utf8");
+const profileHelpers = source.slice(0, source.indexOf("function findValue"));
+const { cleanProfile } = Function(`${profileHelpers}; return { cleanProfile };`)();
 const helpers = source.slice(source.indexOf("function fieldLabel"), source.indexOf("const missingLocalValue"));
 const { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions } = Function(`${helpers}; return { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions };`)();
 
 const result = missingFieldLabels(["民族", "期望工作城市"], [{ label: "期望工作城市" }]);
 assert.deepEqual(result, { unresolved: ["期望工作城市"], unavailable: ["民族"] });
+assert.equal(cleanProfile({ awards: [{ name: "奖项", awardDate: "2025-06" }] }).awards[0].date, "2025-06");
 assert.equal(uniqueEmptyFields([{ key: "page::工作地点::text::0", label: "工作地点", module: "", repeatIndex: 0 }, { key: "page::工作地点::text::1", label: "工作地点", module: "", repeatIndex: 0 }]).length, 2);
+assert.deepEqual(uniqueEmptyFields([undefined, { key: "city", label: "期望城市" }]), [{ key: "city", label: "期望城市" }]);
+assert.deepEqual(uniqueEmptyFields(), []);
 assert.deepEqual(aiFieldContext({ label: "培训机构", module: "培训经历", repeatIndex: 0 }, { jobIntent: { city: "广州" } }), {});
 assert.deepEqual(fieldsWithLiveOptions([{ type: "text", optionSource: "popup", options: ["计算机软件"] }, { type: "radio", optionSource: "radio", options: [] }]), [{ type: "text", optionSource: "popup", options: ["计算机软件"] }]);
+assert.deepEqual(fieldsWithLiveOptions([undefined, { options: ["广州"] }]), [{ options: ["广州"] }]);
+assert.deepEqual(fieldsWithLiveOptions(), []);
 assert.equal(hasProfileContext({ label: "培训地点", module: "培训经历", repeatIndex: 0 }, { jobIntent: { city: "广州" } }), false);
 assert.equal(hasProfileContext({ label: "期望工作城市", module: "求职意向" }, { jobIntent: { city: "广州" } }), true);
 const candidateProfile = { jobIntent: { industry: "互联网", occupation: "前端开发", expectedSalary: "3500", city: "广州市" }, work: [{ location: "广州市" }, { location: "深圳市" }] };
@@ -21,9 +28,16 @@ assert.equal(localCandidate({ label: "工作地点", module: "工作经历", rep
 assert.equal(aiFieldContext({ label: "工作地点", module: "", repeatIndex: 0, occurrence: 1 }, candidateProfile).experience.location, "深圳市");
 assert.equal(localCandidate({ label: "期望从事职业", options: ["前端开发工程师", "前端开发实习生"] }, candidateProfile), "");
 assert.deepEqual(localCandidateAssignments([{ key: "city", index: 2, label: "期望工作城市", options: ["广州", "深圳"] }], candidateProfile), [{ key: "city", index: 2, label: "期望工作城市", value: "广州", confidence: 1 }]);
+assert.deepEqual(localCandidateAssignments([{ key: "city", index: 2, label: "期望工作城市", options: ["广东省", "浙江省"] }], candidateProfile), []);
+assert.deepEqual(localCandidateAssignments([{ key: "city", index: 2, label: "工作地点", module: "工作经历", repeatIndex: 0, options: ["广东省", "广州市"] }], candidateProfile), [{ key: "city", index: 2, label: "工作地点", value: "广州市", confidence: 1 }]);
 assert.deepEqual(cascadeChildOptions(["广东省", "广州市", "深圳市"], new Set(["广东省"])), ["广州市", "深圳市"]);
 assert.deepEqual([...retryFieldKeys([{ key: "city", optionSource: "popup", options: [] }], 1)], ["city"]);
+assert.deepEqual([...retryFieldKeys([undefined, { key: "city", optionSource: "popup", options: [] }], 1)], ["city"]);
+assert.deepEqual([...retryFieldKeys(undefined, 1)], []);
 assert.deepEqual([...retryFieldKeys([], 0)], []);
+const choiceStepSource = source.slice(source.indexOf("const choiceStep ="), source.indexOf("const awardChoice ="));
+const { choiceStep } = Function(`${choiceStepSource}; return { choiceStep };`)();
+assert.doesNotThrow(() => choiceStep(null, "年"));
 assert.doesNotMatch(source, /forceMatch/);
 assert.match(source, /body: JSON\.stringify\(\{ profile, fields: aiFields \}\)/);
 assert.match(source, /const liveFields = fieldsWithLiveOptions\(scannedFields\)/);

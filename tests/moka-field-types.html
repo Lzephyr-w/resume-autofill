@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8">
+<section>
+  <h2>教育背景</h2>
+  <div class="multi">
+    <div class="repeat-row">
+      <div class="apply-field date_info">
+        <div class="title-date">就读时间</div>
+        <div class="month-range-select date_info wrapper">
+          <input id="startYear"><input id="startMonth"><span>-</span><input id="endYear"><input id="endMonth">
+        </div>
+      </div>
+      <div class="apply-field string_info">
+        <div class="title-school">学校名称</div>
+        <div class="sd-Dropdown-container"><label class="sd-Input-container sd-Select-container"><span class="sd-Input-display-value"></span><input id="school" placeholder="请输入就读学校"></label><div class="sd-Dropdown-menu" style="display:none;position:absolute"><div class="sd-Select-common-item sd-Select-pointer"><div class="sd-Menu-container"><div class="sd-Menu-content-item"><div>广东工业大学</div></div></div></div></div></div>
+      </div>
+      <div class="apply-field string_info">
+        <div class="title-major">专业名称</div>
+        <div class="sd-Dropdown-container"><label class="sd-Input-container sd-Select-container"><span class="sd-Input-display-value"></span><input id="major" placeholder="请输入专业名称"></label><div class="sd-Dropdown-menu" style="display:none;position:absolute"><div class="sd-Select-common-item sd-Select-pointer"><div class="sd-Menu-container"><div class="sd-Menu-content-item"><div>计算机科学与技术</div></div></div></div></div></div>
+      </div>
+      <div class="apply-field option_info">
+        <div class="title-degree">学历</div>
+        <div class="sd-Dropdown-container"><label class="sd-Input-container sd-Select-container"><span class="sd-Input-display-value"></span><input id="degree" placeholder="请选择"></label><div class="sd-Dropdown-menu" style="display:none;position:absolute"><div class="sd-Select-common-item"><div class="sd-Menu-container"><div class="sd-Menu-content-item"><div>本科</div></div></div></div></div></div>
+      </div>
+    </div>
+    <div class="repeat-row">
+      <div class="apply-field date_info">
+        <div class="title-date">就读时间</div>
+        <div class="month-range-select date_info wrapper">
+          <input><input><span>-</span><input><input>
+        </div>
+      </div>
+      <div class="apply-field string_info"><div class="title-school">学校名称</div><label class="sd-Select-container"><input></label></div>
+    </div>
+  </div>
+</section>
+<div class="global-Dropdown" style="position:fixed;right:0;top:0"><div class="nav-item">个人信息</div><div class="nav-item">教育背景</div></div>
+<pre id="result">RUNNING</pre>
+<script>
+  globalThis.__RESUME_AUTOFILL_TEST__ = true;
+  document.addEventListener("mousedown", (event) => {
+    event.target.closest?.(".sd-Menu-container")?.closest(".sd-Dropdown-menu")?.remove();
+  });
+  document.addEventListener("click", (event) => {
+    const input = event.target.closest?.(".sd-Select-container input");
+    if (input?.closest(".option_info")) input.closest(".sd-Dropdown-container").querySelector(".sd-Dropdown-menu").style.display = "block";
+    const menuItem = event.target.closest?.(".sd-Menu-container");
+    const option = menuItem?.closest(".sd-Select-common-item");
+    const menu = option?.closest(".sd-Dropdown-menu");
+    if (option && menu.style.display !== "none") {
+      option.dataset.committed = "true";
+      const input = menu.closest(".sd-Dropdown-container").querySelector("input");
+      input.value = "";
+      input.previousElementSibling.textContent = option.textContent.trim();
+      menu.style.display = "none";
+    }
+  });
+  document.addEventListener("input", (event) => {
+    if (event.target.closest?.(".string_info")) event.target.closest(".sd-Dropdown-container").querySelector(".sd-Dropdown-menu").style.display = "block";
+  });
+</script>
+<script src="../content.js"></script>
+<script>
+  (async () => {
+    const api = globalThis.__resumeAutofillTest;
+    const schema = api.formSchema();
+    const assignments = [["school", "广东工业大学"], ["major", "计算机科学与技术"], ["degree", "本科"]].map(([id, value]) => {
+      const field = schema.find((item) => item.id === id);
+      return { key: field.key, index: field.index, label: field.label, value, confidence: 1 };
+    });
+    const filled = await api.applyAssignments(assignments);
+    const actual = {
+      schoolChoice: api.isChoiceControl(school), majorChoice: api.isChoiceControl(major),
+      schoolCommitted: document.querySelector(".title-school + * .sd-Select-common-item").dataset.committed,
+      majorCommitted: document.querySelector(".title-major + * .sd-Select-common-item").dataset.committed,
+      degreeCommitted: document.querySelector(".title-degree + * .sd-Select-common-item").dataset.committed,
+      start: api.rowField("学校名称", 0, "教育开始", "教育背景")?.id,
+      end: api.rowField("学校名称", 0, "教育结束", "教育背景")?.id,
+      filled: filled.filled
+    };
+    const passed = !actual.schoolChoice && !actual.majorChoice && actual.schoolCommitted === "true" && actual.majorCommitted === "true"
+      && actual.degreeCommitted === "true" && actual.start === "startYear" && actual.end === "endYear" && actual.filled === 3;
+    result.textContent = `${passed ? "PASS" : "FAIL"} moka field types ${JSON.stringify(actual)}`;
+  })();
+</script>

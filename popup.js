@@ -98,6 +98,10 @@ function cleanProfile(input) {
   base.awards = Array.isArray(p.awards) ? p.awards.map((item) => Object.fromEntries(
     Object.entries(item || {}).map(([k, v]) => [k, String(v ?? "").trim()])
   )) : awardsFromText(p.extras?.awards);
+  base.awards = base.awards.map((row) => ({
+    ...row,
+    date: row.date || row.awardDate || row.awardedAt || row.time || row.获奖时间 || row.获得时间 || row.获奖日期 || ""
+  }));
   const legacyInternships = base.work.filter((row) => /实习|intern/i.test(`${row.workType || ""} ${row.title || ""}`));
   base.work = base.work.filter((row) => !legacyInternships.includes(row));
   if (legacyInternships.length) base.internships = [...base.internships, ...legacyInternships];
@@ -371,7 +375,7 @@ function missingFieldLabels(missingFields, fields) {
 }
 function uniqueEmptyFields(fields) {
   const seen = new Set();
-  return fields.filter((field) => {
+  return (fields || []).filter(Boolean).filter((field) => {
     if (field.currentValue) return false;
     const label = fieldLabel(field);
     // Navigation/search controls are editable page chrome, not application fields.
@@ -396,7 +400,7 @@ function aiFieldContext(field, profile) {
           : /工作地点|办公地点|工作地区|办公城市|任职地点/.test(label) ? rows[index]?.location : "";
   return { ...(intentField ? { jobIntent: profile?.jobIntent || {} } : {}), ...(rows.length && Number.isInteger(index) ? { experience: rows[index] || null } : {}), ...(sourceValue ? { sourceValue: String(sourceValue) } : {}) };
 }
-const fieldsWithLiveOptions = (fields) => fields.filter((field) => field.options?.length);
+const fieldsWithLiveOptions = (fields) => (fields || []).filter(Boolean).filter((field) => field.options?.length);
 const hasProfileContext = (field, profile) => Object.values(aiFieldContext(field, profile)).some((value) => value && (typeof value !== "object" || Object.values(value).some(Boolean)));
 const choiceToken = (value) => String(value || "").toLowerCase().replace(/[：:（）()\[\]【】／\/\s_-]/g, "");
 const uniqueAnchorOption = (value, options) => {
@@ -433,14 +437,24 @@ const localCandidate = (field, profile) => {
   }) : [];
   return matches.length === 1 ? matches[0] : uniqueAnchorOption(value, options);
 };
+const isCascadeField = (field) => /城市|地点|地区|所在地/.test(fieldLabel(field));
+const committedCascadeCandidate = (value, source) => {
+  const candidate = choiceToken(value); const wanted = choiceToken(source);
+  const short = (text) => text.replace(/(?:特别行政区|自治区|省|市|区|县)$/g, "");
+  return candidate === wanted || short(candidate) === short(wanted)
+    || wanted.endsWith(candidate) && !/(?:省|自治区|特别行政区)$/.test(String(value));
+};
 const localCandidateAssignments = (fields, profile) => fields.flatMap((field) => {
   const value = localCandidate(field, profile);
+  const source = aiFieldContext(field, profile).sourceValue;
+  // A unique province is only a navigation step, not a committed city value.
+  if (isCascadeField(field) && !committedCascadeCandidate(value, source)) return [];
   return value ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1 }] : [];
 });
-const isCascadeField = (field) => /城市|地点|地区|所在地/.test(fieldLabel(field));
 const cascadeChildOptions = (options, parentOptions) => (options || []).filter((option) => !parentOptions.has(choiceToken(option)));
-const retryFieldKeys = (scannedFields, filled) => new Set(filled ? scannedFields
-  .filter((field) => field.optionSource === "popup" && !field.options?.length && !/日期|时间|年月|date|month/i.test(`${field.type} ${field.label} ${field.ariaLabel} ${field.placeholder}`))
+const retryFieldKeys = (scannedFields, filled) => new Set(filled ? (scannedFields || [])
+  .filter(Boolean)
+  .filter((field) => field.optionSource === "popup" && !field.options?.length && !/日期|时间|年月|date|month/i.test(`${field.type || ""} ${field.label || ""} ${field.ariaLabel || ""} ${field.placeholder || ""}`))
   .map((field) => field.key) : []);
 const missingLocalValue = (field, profile) => /^(?:现|当前|目前)月薪/.test(fieldLabel(field)) && !String(profile?.jobIntent?.currentSalary || "").trim();
 
@@ -613,6 +627,8 @@ $("ai").addEventListener("click", async () => {
     const unavailableText = unavailable.slice(0, 6).join("、");
     const absentIntent = Object.entries(repaired.diagnostics?.intentSources || {}).filter(([, present]) => !present).map(([label]) => label).join("、");
     const allDiagnostics = { structured: repaired.diagnostics?.structuredAttempts || [], targetFields: repaired.diagnostics?.targetFields || [], experienceLocations: repaired.diagnostics?.experienceLocations || [], sources: repaired.diagnostics?.intentSources || {}, deferredFields: repaired.diagnostics?.deferredFields || [], ai: aiDiagnostics };
+    const absentStructured = [...new Set(allDiagnostics.structured.filter((item) => item.reason === "profile-value-missing")
+      .map((item) => `${item.section || "字段"}[${Number(item.row) || 1}].${item.label}`))].join("、");
     await chrome.storage.local.set({ lastAiDiagnostics: allDiagnostics });
     show({ ...profile, __aiDiagnostics: allDiagnostics });
     const failurePriority = { "page-option-or-validation-failed": 0, "field-not-found": 0, "cascade-child-options-not-read": 1, "not-a-page-option": 1, "candidate-not-read": 1, "options-unavailable": 1, "low-confidence": 2, "ai-no-assignment": 3, "unknown-field": 3, "cascade-parent-selected": 3, "profile-value-missing": 9 };
@@ -625,6 +641,25 @@ $("ai").addEventListener("click", async () => {
     const structuralSalary = allDiagnostics.structured.find((item) => item.label === "月薪(税前)" && item.row === 2 && !["filled", "deferred-to-ai"].includes(item.reason));
     const choiceText = structuralSalary?.choice ? (structuralSalary.choice.optionFound ? `（候选“${structuralSalary.choice.option}”，点击后“${structuralSalary.choice.afterConfirm || structuralSalary.choice.afterClick || "空"}”）` : "（未找到3500对应候选）") : "";
     const structuralText = structuralSalary ? `；第2条经历月薪：${reasonText[structuralSalary.reason] || structuralSalary.reason}${choiceText}` : "";
+    const structuralAward = allDiagnostics.structured.find((item) => item.section === "获奖经历" && item.row === 2 && item.label === "获奖时间" && item.reason !== "filled");
+    const awardSource = structuralAward && (!structuralAward.value ? "本地日期为空" : structuralAward.datePartCount < 2 ? "本地仅含年份" : "本地含年月");
+    const choiceStep = (choice, part) => {
+      const trace = choice || {};
+      const path = trace.path ? `路径 ${trace.path}，` : "";
+      const state = trace.optionFound ? `候选“${trace.option || ""}”` : trace.failure === "popup-not-found" ? "未找到弹层" : "未找到候选";
+      const after = trace.afterConfirm || trace.afterClick || "空";
+      return `${part}：${path}${state}，点击后“${after}”${trace.confirmed ? "，已确认" : `，未确认${trace.failure ? `（${trace.failure}）` : ""}`}`;
+    };
+    const awardChoice = structuralAward?.choice ? `（${choiceStep(structuralAward.choice, "年")}${structuralAward.choice.month ? `；${choiceStep(structuralAward.choice.month, "月")}` : ""}）` : "（未记录选择路径）";
+    const educationFailures = allDiagnostics.structured.filter((item) => item.section === "教育背景"
+      && /学校名称|专业名称|学历/.test(item.label) && item.reason !== "filled");
+    const educationText = educationFailures.length ? `；教育选择诊断：${educationFailures.map((item) => {
+      const trace = item.choice || {};
+      const state = trace.afterClickState || {};
+      return `${choiceStep(trace, item.label)}，click=${trace.clickObserved ? "到达" : "未到达"}，显示=${(state.displays || []).join("/") || "空"}，弹层=${state.popupVisible ? "开" : "关"}`;
+    }).join("；")}` : "";
+    const awardTarget = structuralAward ? `（${structuralAward.targetIndex >= 0 ? "字段已定位" : "字段未定位"}，日期控件 ${structuralAward.dateControlCount || 0} 个）` : "";
+    const awardText = structuralAward ? `；第2条获奖时间：${awardSource}，${reasonText[structuralAward.reason] || structuralAward.reason}${awardChoice}${awardTarget}` : "";
     const diagnosticText = failed.length ? `；AI诊断：${failed.map((item) => {
       const choice = item.reason === "page-option-or-validation-failed" && item.choice ? (item.choice.optionFound ? `（候选“${item.choice.option || ""}”，点击后“${item.choice.afterClick || "空"}”，确认后“${item.choice.afterConfirm || "空"}”${item.choice.confirmFound ? "，已找到确认" : "，无确认"}）` : "（未找到页面候选）")
         : "";
@@ -632,7 +667,8 @@ $("ai").addEventListener("click", async () => {
         : ["ai-no-assignment", "not-a-page-option", "candidate-not-read", "options-unavailable"].includes(item.reason) ? `（候选 ${item.optionCount || 0} 个${item.optionSource ? `，${item.optionSource}` : ""}）` : "";
       return `${item.label || item.key}:${reasonText[item.reason] || item.reason}${choice || detail}`;
     }).join("、")}` : "";
-    message(`结构化填充 ${repaired.filled} 项，实时候选匹配 ${candidateFilled} 项，AI 补充 ${aiFilled} 项，保留页面原值 ${repaired.skippedFields?.length || 0} 项${remaining.length ? `；页面仍有 ${remaining.length} 个空字段${examples ? `（${examples}）` : ""}` : ""}${unresolvedText ? `；结构化未完成：${unresolvedText}` : ""}${unavailableText ? `；页面未提供：${unavailableText}` : ""}${absentIntent ? `；本地档案未提供：${absentIntent}` : ""}${structuralText}${diagnosticText}。请检查后自行提交。`, false, "ai-status");
+    const absentProfile = [absentIntent, absentStructured].filter(Boolean).join("、");
+    message(`结构化填充 ${repaired.filled} 项，实时候选匹配 ${candidateFilled} 项，AI 补充 ${aiFilled} 项，保留页面原值 ${repaired.skippedFields?.length || 0} 项${remaining.length ? `；页面仍有 ${remaining.length} 个空字段${examples ? `（${examples}）` : ""}` : ""}${unresolvedText ? `；结构化未完成：${unresolvedText}` : ""}${unavailableText ? `；页面未提供：${unavailableText}` : ""}${absentProfile ? `；本地档案未提供：${absentProfile}` : ""}${structuralText}${awardText}${educationText}${diagnosticText}。请检查后自行提交。`, false, "ai-status");
   } catch (error) {
     const detail = String(error.message || error);
     if (detail.includes("Failed to fetch")) { $("ai-status").textContent = ""; $("ai-status").className = ""; message("配置已保存，但本地 Node 代理未启动。请先运行 README 中的 node 命令。", false, "connect-status", "hint"); }
