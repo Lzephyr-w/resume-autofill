@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_PROTOCOL = 3;
+  const CONTENT_PROTOCOL = 19;
   if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -294,9 +294,12 @@
   };
   const isExplicitTextInput = (el) => el?.tagName === "INPUT" && !el.readOnly && !el.getAttribute("role") && !el.hasAttribute("aria-haspopup")
     && !!el.closest("[class*='string_info'], [class*='string-info'], [class*='stringInfo'], [data-field-type='string_info']");
-  const isAutocompleteControl = (el) => isExplicitTextInput(el) && !!choiceRoot(el);
+  const isSuggestionControl = (el) => el?.tagName === "INPUT" && !el.readOnly && /autocomplete|suggest|typeahead/i.test([
+    el.className, el.getAttribute("aria-autocomplete"), el.parentElement?.className, el.parentElement?.getAttribute("role")
+  ].join(" "));
+  const isAutocompleteControl = (el) => isSuggestionControl(el) || isExplicitTextInput(el) && !!choiceRoot(el);
   const isChoiceControl = (el) => !!el && !isExplicitTextInput(el) && (el.tagName === "SELECT" || ["radio", "checkbox"].includes(el.type)
-    || ["combobox", "radio", "checkbox"].includes(el.getAttribute("role")) || el.hasAttribute("aria-haspopup") || !!choiceRoot(el));
+    || ["combobox", "radio", "checkbox"].includes(el.getAttribute("role")) || el.hasAttribute("aria-haspopup") || !!choiceRoot(el)) && !isSuggestionControl(el);
   const controlValue = (el, box = fieldContainer(el)) => {
     if (!el) return "";
     if (el.type === "checkbox" || el.type === "radio" || el.getAttribute("role") === "checkbox" || el.getAttribute("role") === "radio") return el.checked || el.getAttribute("aria-checked") === "true" ? (el.value || "true") : "";
@@ -319,20 +322,6 @@
     const nodes = [...(scope?.querySelectorAll("option, [role=option], [class*='option'], [class*='Option']") || []), ...(controlled?.querySelectorAll("option, [role=option], [class*='option'], [class*='Option']") || [])];
     return nodes
       .filter((option) => option.tagName === "OPTION" || visible(option)).map((option) => clean(option.innerText || option.textContent)).filter((value) => value && !/^请选择|^暂无选项$/.test(value)).filter((value, index, all) => all.indexOf(value) === index).slice(0, 80);
-  };
-  const stableKey = (el, index) => {
-    const explicit = el.getAttribute("data-field-key") || el.getAttribute("data-testid");
-    if (explicit && fields().filter((candidate) => (candidate.getAttribute("data-field-key") || candidate.getAttribute("data-testid")) === explicit).length === 1) return explicit;
-    const label = normalize(fieldTitle(el) || el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.name || el.id || labelText(el) || `field${index}`);
-    const module = normalize(moduleTitle(el));
-    const row = repeatIndex(el, label);
-    const identity = el.name || el.id || controlType(el);
-    const base = [module || "page", label, identity, row].filter(Boolean).join("::");
-    const ordinal = fields().slice(0, index).filter((candidate, candidateIndex) => {
-      const candidateLabel = normalize(fieldTitle(candidate) || candidate.getAttribute("aria-label") || candidate.getAttribute("placeholder") || candidate.name || candidate.id || labelText(candidate) || `field${candidateIndex}`);
-      return [normalize(moduleTitle(candidate)) || "page", candidateLabel, candidate.name || candidate.id || controlType(candidate), repeatIndex(candidate, candidateLabel)].filter(Boolean).join("::") === base;
-    }).length;
-    return `${base}::${ordinal}`;
   };
   // ponytail: one DOM-label heuristic covers Vue/React forms; add site selectors only when a real page needs them.
   const FIELD_ALIASES = {
@@ -429,7 +418,7 @@
     return fields().filter((el) => wanted.some((value) => normalize(semanticText(el) + " " + labelText(el)).includes(value)));
   };
 
-  function setValue(el, value) {
+  function setValue(el, value, inputOnly = false) {
     if (!el || value == null || value === "") return false;
     if (el.readOnly && (el.getAttribute("role") === "combobox" || el.hasAttribute("aria-haspopup") || /select|cascader|calendar|date|area/i.test(String(el.className || "")) || /籍贯|居住|户籍|地区|日期|时间|省|市/.test(String(el.getAttribute("aria-label") || el.placeholder || el.name || el.id || el.parentElement?.innerText || "")))) return false;
     if (el.type === "checkbox" || el.type === "radio" || el.getAttribute("role") === "checkbox" || el.getAttribute("role") === "radio") {
@@ -472,8 +461,10 @@
       setter ? setter.call(el, value) : (el.value = value);
     }
     el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    el.dispatchEvent(new Event("blur", { bubbles: true }));
+    if (!inputOnly) {
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new Event("blur", { bubbles: true }));
+    }
     return true;
   }
 
@@ -548,15 +539,23 @@
     const selector = "[role=option], li, [data-value], [class*='option'], [class*='Option'], [class*='item'], [class*='Item']";
     const text = (node) => clean(node.textContent || node.getAttribute("data-value") || node.getAttribute("value"));
     const action = (node) => node.matches?.("button, [role=button], [data-confirm], [data-confirm] *, [class*='button'], [class*='Button'], [class*='btn'], [class*='Btn']") || /^(?:确定|取消)$/.test(text(node));
-    const semantic = [...(scope?.querySelectorAll(selector) || [])].filter((node) => !action(node));
+    const candidates = [...(scope?.querySelectorAll(selector) || [])].filter((node) => !action(node) && visible(node));
+    const candidateSet = new Set(candidates);
+    const candidateText = new Map(candidates.map((node) => [node, text(node)]));
+    const aggregate = new Set();
+    for (const child of candidates) for (let parent = child.parentElement; parent && parent !== scope; parent = parent.parentElement) {
+      if (candidateSet.has(parent) && candidateText.get(child) && candidateText.get(child) !== candidateText.get(parent)) aggregate.add(parent);
+    }
+    const semantic = candidates.filter((node) => !aggregate.has(node));
     // Some component libraries use plain div/span rows. Keep their visible
-    // leaf text, but not containers that merely repeat a child's label.
-    const leaves = [...(scope?.querySelectorAll("*") || [])].filter((node) => {
+    // leaf text only when no semantic option exists; otherwise nested labels
+    // can turn a parent container into a fake “province + city” candidate.
+    const leaves = semantic.length ? [] : [...(scope?.querySelectorAll("*") || [])].filter((node) => {
       const value = text(node);
       return value && value.length <= 80 && !action(node) && ![...node.children].some((child) => visible(child) && text(child) === value);
     });
     const seen = new Set();
-    return [...semantic, ...leaves].filter(visible).filter((node) => {
+    return (semantic.length ? semantic : leaves).filter(visible).filter((node) => {
       const value = text(node);
       if (!value || /^请选择$|^暂无选项$/.test(value) || seen.has(value)) return false;
       seen.add(value);
@@ -624,7 +623,7 @@
       lastOpenedControl = control;
       const popup = nearestPopup();
       const rect = control.getBoundingClientRect();
-      const selectedPopup = popup || await waitFor(() => popupFor(control).sort((a, b) => {
+      let selectedPopup = popup || await waitFor(() => popupFor(control).sort((a, b) => {
         const distance = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - rect.left) + Math.abs(r.top - rect.top); };
         return distance(a) - distance(b);
       })[0]);
@@ -634,16 +633,21 @@
         const before = new Set(popupDetails.texts);
         // Cascaders often replace the province pane a tick after its click.
         // Keep this one popup open and wait only for genuinely new candidates.
-        if (!previous.size || !popupDetails.texts.some((text) => !previous.has(text))) await waitFor(() => popupOptionNodes(selectedPopup).some((node) => {
+        if (!previous.size || !popupDetails.texts.some((text) => !previous.has(text))) await waitFor(() => {
+          selectedPopup = nearestPopup() || selectedPopup;
+          return popupOptionNodes(selectedPopup).some((node) => {
           const text = clean(node.textContent || node.getAttribute("data-value") || node.getAttribute("value"));
           return text && !before.has(text);
-        }), 1600);
+          });
+        }, 1600);
         popupDetails = await popupOptionDetails(selectedPopup);
       }
       descriptor.options = [...new Set([...known, ...popupDetails.texts])].slice(0, 80);
       descriptor.optionSource = selectedPopup ? "popup" : "popup-not-found";
       descriptor.optionCount = descriptor.options.length;
       descriptor.hasSearch = popupDetails.hasSearch;
+      descriptor.hasConfirmation = !!confirmationFor(selectedPopup, control);
+      descriptor.isMultiSelector = /(?:已选(?:地区)?\s*\d+\s*\/|清空已选)/.test(clean(selectedPopup?.innerText || selectedPopup?.textContent));
       descriptor.scrolled = popupDetails.scrolled;
       if (!keepOpen) { await closeVisibleDropdowns(control); lastOpenedControl = null; }
     }
@@ -665,23 +669,44 @@
     const marker = text.search(/\s+(?=(?:负责|实现|构建|设计|开发|使用|参与|主导))/);
     return marker > 0 ? { summary: text.slice(0, marker).trim(), responsibilities: text.slice(marker).trim() } : { summary: text, responsibilities: "" };
   };
-  const clickOption = (el) => {
-    if (!el) return;
-    el.click();
+  const clickOption = async (el, trusted = false) => {
+    if (!el) return false;
+    if (trusted && globalThis.chrome?.runtime?.sendMessage) {
+      const rect = el.getBoundingClientRect();
+      try {
+        const result = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_TRUSTED_CLICK", x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        if (result?.clicked) return true;
+      } catch {}
+    }
+    const event = (type) => typeof PointerEvent === "function" && type.startsWith("pointer")
+      ? new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", isPrimary: true })
+      : new MouseEvent(type, { bubbles: true, cancelable: true });
+    // Phoenix's area rows bind selection on pointer-down; HTMLElement.click()
+    // skips that phase and leaves the confirm button with no pending choice.
+    ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((type) => el.dispatchEvent(event(type)));
+    if (typeof el.click === "function") el.click();
+    else el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return true;
   };
   const selectionTarget = (option) => {
     const menuItem = option?.matches?.("[class*='Menu-container'], [class*='menu-container']") ? option
       : option?.querySelector?.("[class*='Menu-container'], [class*='menu-container']");
     if (menuItem) return menuItem;
+    const areaItem = option?.closest?.("[class*='area-item-container'], [class*='Area-item-container']");
+    if (areaItem) return areaItem.querySelector("[class*='icon-container'], [class*='Icon-container']") || areaItem;
+    const listItem = option?.closest?.("[class*='list-item-container'], [class*='List-item-container']");
+    if (listItem) return listItem.querySelector("[class*='icon-container'], [class*='Icon-container']") || listItem;
     const marker = option?.querySelector?.("input[type=checkbox], input[type=radio], [role=checkbox], [role=radio], [aria-checked], [class*='Checkbox'], [class*='checkbox'], [class*='Radio'], [class*='radio']");
     if (marker) return marker.closest?.("input, label, button, [role=checkbox], [role=radio], [class*='icon'], [class*='Icon']") || marker;
     return option;
   };
   const choiceState = (control, popup, target) => {
     const root = choiceRoot(control);
+    const selected = clean(popup?.innerText || popup?.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
     return {
       input: clean(control?.value), current: controlValue(control),
       displays: [...(root?.querySelectorAll?.("[class*='display-value'], [aria-valuetext]") || [])].map((node) => clean(node.textContent || node.getAttribute("aria-valuetext"))).filter(Boolean),
+      selected,
       controlConnected: !!control?.isConnected, targetConnected: !!target?.isConnected,
       popupConnected: !!popup?.isConnected, popupVisible: visible(popup)
     };
@@ -716,20 +741,52 @@
     setter ? setter.call(el, value) : (el.value = value);
     el.dispatchEvent(new Event("input", { bubbles: true }));
   };
+  const popupMatchesValue = (popup, value) => {
+    const wanted = normalize(value);
+    return !!wanted && popupOptionNodes(popup).some((option) => {
+      const text = normalize(option.textContent || option.getAttribute("data-value") || option.getAttribute("value"));
+      return text === wanted || text.includes(wanted) || wanted.includes(text);
+    });
+  };
+  const mayReopenSuggestions = (el) => el?.tagName === "INPUT" && !el.readOnly
+    && (isSuggestionControl(el) || /(?:^|[-_])(?:input|field|control)(?:$|[-_])/i.test(`${el.className} ${el.parentElement?.className || ""}`));
+  async function writeAndObserveSuggestion(label, value, target, chooseOptions = {}) {
+    const before = new Set(openDropdowns());
+    if (!setValue(target, value, true)) return false;
+    const popup = await waitFor(() => openDropdowns().find((candidate) => !before.has(candidate) && popupMatchesValue(candidate, value)), 180);
+    if (!popup) {
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+      target.dispatchEvent(new Event("blur", { bubbles: true }));
+      return true;
+    }
+    return choose(label, value, target, false, chooseOptions);
+  }
 
   function formSchema() {
-    return fields().map((el, index) => {
+    const controls = fields();
+    const metadata = controls.map((el, index) => {
       // Prefer the nearest visible label. Ancestor text often repeats “请选择”
       // and every sibling label, which makes an otherwise precise AI request noisy.
       const label = clean(fieldTitle(el) || el.getAttribute("aria-label") || associatedLabels(el)[0] || el.getAttribute("placeholder") || labelText(el) || el.name || el.id);
-      const key = stableKey(el, index);
+      const stableLabel = normalize(fieldTitle(el) || el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.name || el.id || labelText(el) || `field${index}`);
+      const module = moduleTitle(el);
+      const repeat = repeatIndex(el, label);
+      const base = [normalize(module) || "page", stableLabel, el.name || el.id || controlType(el), repeatIndex(el, stableLabel)].filter(Boolean).join("::");
+      return { el, index, label, module, repeat, base, explicit: el.getAttribute("data-field-key") || el.getAttribute("data-testid") };
+    });
+    const explicitCounts = new Map(); const ordinals = new Map();
+    metadata.forEach(({ explicit }) => { if (explicit) explicitCounts.set(explicit, (explicitCounts.get(explicit) || 0) + 1); });
+    return metadata.map(({ el, index, label, module, repeat, base, explicit }) => {
+      const ordinal = ordinals.get(base) || 0;
+      ordinals.set(base, ordinal + 1);
+      const key = explicit && explicitCounts.get(explicit) === 1 ? explicit : `${base}::${ordinal}`;
       const occurrence = Number(key.match(/::(\d+)$/)?.[1] || 0);
       return {
         key, index,
         label,
         ariaLabel: clean(el.getAttribute("aria-label")), placeholder: clean(el.getAttribute("placeholder")),
         name: clean(el.name), id: clean(el.id),
-        module: moduleTitle(el), repeatIndex: repeatIndex(el, label), occurrence, currentValue: controlValue(el),
+        module, repeatIndex: repeat, occurrence, currentValue: controlValue(el),
         type: controlType(el), options: optionTexts(el)
       };
     });
@@ -746,7 +803,7 @@
       const el = descriptor && controls[descriptor.index];
       const detail = { key: assignment.key, label: assignment.label || descriptor?.label || "", value: assignment.value || "" };
       if (!el || !assignment.value) { diagnostics.push({ ...detail, reason: "field-not-found" }); continue; }
-      if (controlValue(el)) { diagnostics.push({ ...detail, reason: "page-value-protected" }); continue; }
+      if (controlValue(el) && !(mayReopenSuggestions(el) && normalize(controlValue(el)) === normalize(assignment.value))) { diagnostics.push({ ...detail, reason: "page-value-protected" }); continue; }
       if (!Number.isFinite(Number(assignment.confidence)) || Number(assignment.confidence) < 0.65 && !isChoiceControl(el)) { diagnostics.push({ ...detail, reason: "low-confidence" }); continue; }
       const targetLabel = fieldTitle(el) || assignment.label || labelText(el);
       // Guard the common AI failure: dates/scores must not land in free-text descriptions.
@@ -904,7 +961,7 @@
           const targetYear = Number(year);
           const direction = targetYear < currentYear ? "prev" : "next";
           const pickerNodes = () => [...new Set([monthPanel, ...monthPanel.querySelectorAll("*"), ...popupNodes()])].filter(visible);
-          const yearButton = () => pickerNodes().find((el) => el.matches?.("button, [role=button]") && `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`.match(new RegExp(`${direction}.*year`, "i")));
+          const yearButton = () => pickerNodes().find((el) => el.matches?.("a, button, [role=button]") && `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`.match(new RegExp(`${direction}.*year`, "i")));
           Object.assign(trace.datePicker, { currentYear, targetYear });
           if (targetYear !== currentYear && yearButton()) {
             trace.datePicker.yearMethod = direction;
@@ -938,7 +995,7 @@
             .map((el) => clean(el.textContent || el.getAttribute("aria-label") || el.getAttribute("title"))).find((text) => /\d{4}/.test(text))?.match(/\d{4}/)?.[0]);
           const targetYear = Number(year);
           const yearDirection = targetYear < currentYear ? "prev" : "next";
-          for (let i = 0; i < Math.abs(targetYear - currentYear); i++) { [...calendar.querySelectorAll("button, [role=button]")].find((el) => `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`.match(new RegExp(`${yearDirection}.*year`, "i")))?.click(); await wait(30); }
+          for (let i = 0; i < Math.abs(targetYear - currentYear); i++) { [...calendar.querySelectorAll("a, button, [role=button]")].find((el) => `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`.match(new RegExp(`${yearDirection}.*year`, "i")))?.click(); await wait(30); }
           const currentMonth = Number([...calendar.querySelectorAll("[aria-label], [title], [class*='month'], [class*='Month'], button, span")]
             .map((el) => clean(el.textContent || el.getAttribute("aria-label") || el.getAttribute("title"))).find((text) => /\b\d{1,2}\b/.test(text))?.match(/\d{1,2}/)?.[0]);
           const targetMonth = Number(month);
@@ -987,7 +1044,8 @@
     const control = target || container?.querySelector("[role=combobox], [aria-haspopup=listbox], input, select");
     if (!control) { trace.failure = "control-not-found"; return false; }
     const controlBox = fieldContainer(control);
-    const readControl = () => controlValue(control, controlBox);
+    const readControl = () => controlValue(control, controlBox)
+      || (!control.isConnected ? clean(controlBox?.querySelector("[class*='select__tag'], [class*='select-tag']")?.textContent) : "");
     Object.assign(trace, { path: "popup", before: readControl() });
     let popup = popupFor(control, lastOpenedControl === control).sort((a, b) => {
       const distance = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - control.getBoundingClientRect().left) + Math.abs(r.top - control.getBoundingClientRect().top); };
@@ -1012,32 +1070,16 @@
       if (found) popup = found;
     };
     const search = [popup?.querySelector("input:not([type=hidden])"), target].find((el) => el?.tagName === "INPUT" && !el.readOnly);
-    const sourceValue = String(chooseOptions.sourceValue || "").trim();
-    const isLocation = /城市|地点|地区|所在地/.test(label);
-    let sourceOption = null;
-    if (isLocation && sourceValue && popup?.querySelector("input:not([type=hidden])") && normalize(sourceValue) !== normalize(value)) {
-      const sourceSearch = popup.querySelector("input:not([type=hidden])");
-      setSearchValue(sourceSearch, sourceValue);
-      await refreshPopup();
-      const source = normalize(sourceValue);
-      const candidates = options().filter((node) => {
-        const text = clean(node.textContent || node.getAttribute("data-value") || node.getAttribute("value"));
-        const candidate = normalize(text);
-        // A province is only a navigation parent when the local value contains
-        // a more specific location; it must not win a search for that location.
-        return candidate && (candidate === source || source.includes(candidate))
-          && !(candidate !== source && /(?:省|自治区|特别行政区)$/.test(text));
-      });
-      sourceOption = candidates.length === 1 ? candidates[0] : null;
-    }
     // A salary search box filters by displayed range text; searching a raw
     // number such as 3500 hides “2001 ~ 4000”. Match ranges from real options.
-    if (search && !sourceOption && !/薪|工资|待遇|掌握程度|熟练程度|技能等级|语言水平|听说|读写/.test(label) && !options().some((el) => matches(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")))) {
+    const proficiencySearch = /掌握程度|熟练程度|技能等级|语言水平|听说|读写/.test(label)
+      ? ["", "了解", "一般", "熟练", "精通"][proficiencyLevel(value)] : "";
+    if (search && !/薪|工资|待遇/.test(label) && !options().some((el) => matches(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")))) {
       // Autocomplete controls need the desired text before their real options exist.
-      setSearchValue(search, value);
+      setSearchValue(search, proficiencySearch || value);
       await refreshPopup();
     }
-    if (/籍贯|居住地|户籍|户口/.test(label)) {
+    if (/籍贯|居住地|户籍|户口|(?:工作|期望).*(?:地点|城市)/.test(label)) {
       const location = String(value).trim().match(/^(.+?(?:省|自治区|特别行政区|市))[\/／,，\s-]*(.+?(?:市|区|县))$/);
       const areaPopup = await waitFor(() => [...document.querySelectorAll("[role=dialog], [class*='area'], [class*='cascader'], [class*='popper'], [class*='popover']")]
         .find((el) => visible(el) && (el.querySelector('input[placeholder="搜索"], input[placeholder*="搜"]') || /全部省市|已选地区|选择地区/.test(clean(el.innerText || el.textContent)))));
@@ -1055,11 +1097,11 @@
         let province = findArea(location[1]);
         if (!province) { writeSearch(location[1]); await wait(100); province = findArea(location[1]); }
         if (province) {
-          clickOption(province);
+          await clickOption(province, true);
           const city = await waitFor(() => findArea(location[2]));
-          if (city) clickOption(city);
+          if (city) await clickOption(selectionTarget(city), true);
           const confirm = confirmationFor(areaPopup, control);
-          if (confirm) { clickOption(confirm); await wait(120); }
+          if (confirm) { await clickOption(confirm, true); await wait(120); }
           await closeVisibleDropdowns(control);
           return !!city;
         }
@@ -1067,11 +1109,11 @@
       if (location) {
         const province = options().find((el) => normalize(el.textContent) === normalize(location[1]));
         if (province) {
-          clickOption(province); await wait(80);
+          await clickOption(province, true); await wait(80);
           const city = options().find((el) => normalize(el.textContent) === normalize(location[2]));
-          if (city) clickOption(city);
+          if (city) await clickOption(selectionTarget(city), true);
           const confirm = confirmationFor(popup, control);
-          if (confirm) { clickOption(confirm); await wait(120); }
+          if (confirm) { await clickOption(confirm, true); await wait(120); }
           await closeVisibleDropdowns(control);
           return !!city;
         }
@@ -1079,8 +1121,7 @@
     }
     const findOption = () => {
       const list = options();
-      if (lastChoice) lastChoice.candidates = list.map((el) => clean(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")));
-      if (sourceOption && list.includes(sourceOption)) return sourceOption;
+      trace.candidates = list.map((el) => clean(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")));
       const exact = list.find((el) => {
         const text = normalize(el.textContent || el.getAttribute("data-value") || el.getAttribute("value"));
         return [...wantedForms, ...optionForms].some((form) => text === form) || numericMonth && /^\d{1,2}$/.test(text) && Number(text) === Number(numericMonth);
@@ -1088,7 +1129,7 @@
       const semantic = list.filter((el) => matches(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")));
       const salary = /薪|工资|待遇/.test(label) && salaryOption(value, list);
       const proficiency = proficiencyOption(value, list, label);
-      if (lastChoice) lastChoice.match = { exact: !!exact, salary: !!salary, proficiency: !!proficiency, semantic: semantic.length };
+      trace.match = { exact: !!exact, salary: !!salary, proficiency: !!proficiency, semantic: semantic.length };
       return exact || salary || proficiency || (semantic.length === 1 ? semantic[0] : null);
     };
     let option = await waitFor(findOption, 1400);
@@ -1110,29 +1151,37 @@
       }
     }
     if (!option) {
-      lastChoice.optionFound = false;
-      lastChoice.failure = popup ? "option-not-found" : "popup-not-found";
-      restoreChoiceSearch(target, lastChoice.before);
+      trace.optionFound = false;
+      trace.failure = popup ? "option-not-found" : "popup-not-found";
+      restoreChoiceSearch(target, trace.before);
       await closeVisibleDropdowns(control);
       return false;
     }
-    lastChoice.optionFound = true;
-    lastChoice.option = clean(option.textContent || option.getAttribute("data-value") || option.getAttribute("value"));
-    lastChoice.selectedValue = lastChoice.option;
-    lastChoice.selectedFromSource = option === sourceOption;
-    lastChoice.commit = "option-click";
-    const commitTarget = chooseOptions.deferConfirm && option !== sourceOption ? option : selectionTarget(option);
-    lastChoice.beforeClickState = choiceState(control, popup, commitTarget);
-    logChoice("before-click", lastChoice, lastChoice.beforeClickState);
-    const observeClick = (event) => { if (event.target === commitTarget || commitTarget?.contains?.(event.target)) lastChoice.clickObserved = true; };
+    trace.optionFound = true;
+    trace.option = clean(option.textContent || option.getAttribute("data-value") || option.getAttribute("value"));
+    trace.selectedValue = trace.option;
+    trace.commit = "option-click";
+    const commitTarget = chooseOptions.deferConfirm ? option : selectionTarget(option);
+    trace.commitTarget = { tag: commitTarget?.tagName || "", className: String(commitTarget?.className || ""), text: clean(commitTarget?.textContent) };
+    trace.beforeClickState = choiceState(control, popup, commitTarget);
+    logChoice("before-click", trace, trace.beforeClickState);
+    const observeClick = (event) => { if (event.target === commitTarget || commitTarget?.contains?.(event.target)) trace.clickObserved = true; };
     document.addEventListener("click", observeClick, true);
-    clickOption(commitTarget);
+    const selectedCount = () => clean(popup?.innerText || popup?.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
+    const selectedBeforeClick = selectedCount();
+    const multiSelector = !!selectedBeforeClick;
+    await clickOption(commitTarget, multiSelector);
     document.removeEventListener("click", observeClick, true);
-    await wait(80);
-    lastChoice.afterClick = readControl();
-    lastChoice.afterClickState = choiceState(control, popup, commitTarget);
-    logChoice("after-click", lastChoice, lastChoice.afterClickState);
-    const choiceForControl = lastChoice;
+    if (multiSelector) {
+      trace.selectionObserved = !!await waitFor(() => {
+        const selected = selectedCount();
+        return selected && selected !== selectedBeforeClick;
+      }, 800);
+    } else await wait(80);
+    trace.afterClick = readControl();
+    trace.afterClickState = choiceState(control, popup, commitTarget);
+    logChoice("after-click", trace, trace.afterClickState);
+    const choiceForControl = trace;
     const controls = pairedControls;
     const controlIndex = controls.indexOf(control);
     if (controlIndex >= 0 && controlIndex % 2 === 0 && controls[controlIndex + 1]) {
@@ -1140,19 +1189,26 @@
       choiceForControl.month = lastChoice;
       lastChoice = choiceForControl;
       if (!monthSelected) {
-        lastChoice.failure = `month:${lastChoice.month?.failure || "not-confirmed"}`;
+        trace.failure = `month:${trace.month?.failure || "not-confirmed"}`;
         return false;
       }
     }
-    const confirm = confirmationFor(popup, control);
-    if (chooseOptions.deferConfirm && confirm && !readControl() && !lastChoice.selectedFromSource) {
-      lastChoice.confirmFound = true;
-      lastChoice.cascadePending = true;
-      lastChoice.afterConfirm = readControl();
+    const confirm = multiSelector
+      ? await waitFor(() => confirmationFor(popup, control), 800)
+      : confirmationFor(popup, control);
+    if (chooseOptions.deferConfirm && confirm && !readControl()) {
+      trace.confirmFound = true;
+      trace.cascadePending = true;
+      trace.afterConfirm = readControl();
       return false;
     }
-    if (confirm) { clickOption(confirm); await wait(120); }
-    lastChoice.confirmFound = !!confirm;
+    if (confirm) {
+      trace.confirmAttempted = true;
+      await clickOption(confirm, multiSelector);
+      if (multiSelector) await waitFor(() => !visible(popup), 800);
+      else await wait(120);
+    }
+    trace.confirmFound = !!confirm;
     const committedControl = control.isConnected ? control : controlBox?.querySelector(controlSelector);
     if (committedControl && committedControl.tagName !== "SELECT" && isChoiceControl(committedControl)) {
       committedControl.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1162,18 +1218,20 @@
     // Component state can render after its click handler returns. Verify the
     // displayed value before closing the popup, rather than cancelling it early.
     const autocomplete = isAutocompleteControl(control);
-    const expectedDisplay = year && month && pairIndex < 0 ? value : lastChoice.selectedValue || value;
-    lastChoice.confirmed = !!await waitFor(() => valueMatches(readControl(), expectedDisplay, label)
+    const expectedDisplay = year && month && pairIndex < 0 ? value : trace.selectedValue || value;
+    const multiCommitted = multiSelector && trace.selectionObserved && !visible(popup);
+    trace.confirmed = multiCommitted || !!await waitFor(() => valueMatches(readControl(), expectedDisplay, label)
       && (!autocomplete || !popup?.isConnected || !visible(popup)), 800);
-    lastChoice.afterConfirm = readControl();
-    if (!lastChoice.confirmed) {
-      lastChoice.failure = autocomplete && valueMatches(readControl(), expectedDisplay, label) ? "popup-still-open" : "display-not-confirmed";
-      restoreChoiceSearch(control, lastChoice.before);
+    trace.afterConfirm = readControl();
+    if (!trace.confirmed) {
+      trace.failure = autocomplete && valueMatches(readControl(), expectedDisplay, label) ? "popup-still-open" : "display-not-confirmed";
+      restoreChoiceSearch(control, trace.before);
     }
-    lastChoice.afterConfirmState = choiceState(committedControl || control, popup, commitTarget);
-    logChoice("confirmed", lastChoice, lastChoice.afterConfirmState);
+    trace.afterConfirmState = choiceState(committedControl || control, popup, commitTarget);
+    logChoice("confirmed", trace, trace.afterConfirmState);
     await closeVisibleDropdowns(committedControl || control);
-    return lastChoice.confirmed;
+    lastChoice = trace;
+    return trace.confirmed;
   }
 
   const valueMatches = (actual, expected, label = "") => {
@@ -1187,7 +1245,7 @@
     const actualDate = dateParts(actual); const expectedDate = dateParts(expected);
     return actualDate.length >= 2 && expectedDate.length >= 2
       && actualDate[0] === expectedDate[0] && actualDate[1] === expectedDate[1]
-      && (!expectedDate[2] || actualDate[2] === expectedDate[2]);
+      && (!expectedDate[2] || !actualDate[2] || actualDate[2] === expectedDate[2]);
   };
   async function applyValue(label, value, target, applyOptions = {}) {
     if (!target || value == null || value === "") return false;
@@ -1200,7 +1258,8 @@
     const autocompleteText = isAutocompleteControl(target);
     const changed = splitDate ? await choose(label, value, target, false, applyOptions)
       : autocompleteText ? await choose(label, value, target, false, applyOptions)
-        : setValue(target, value) || await choose(label, value, target, false, applyOptions);
+        : target.tagName === "INPUT" && !isChoiceControl(target) ? await writeAndObserveSuggestion(label, value, target, applyOptions)
+          : setValue(target, value) || await choose(label, value, target, false, applyOptions);
     if (!changed) return false;
     await wait(70);
     const selected = lastChoice?.selectedValue || value;
@@ -1402,7 +1461,7 @@
             continue;
           }
           const repairWrongDate = /开始时间|结束时间/.test(label) && hasWrongPickerYear(field, value);
-          if (onlyEmpty && field && controlValue(field) && !(forceWorkDescriptions && isWorkText) && !repairWrongDate) {
+          if (onlyEmpty && field && controlValue(field) && !(mayReopenSuggestions(field) && normalize(controlValue(field)) === normalize(value)) && !(forceWorkDescriptions && isWorkText) && !repairWrongDate) {
             if (/开始时间/.test(label)) startDateConfirmed = dateValueMatches(field, value);
             skippedFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "page-value-protected" }); continue;
           }

@@ -357,7 +357,7 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
-const CONTENT_MESSAGE_SUFFIX = "_V3";
+const CONTENT_MESSAGE_SUFFIX = "_V19";
 const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
 const injectCurrentContent = (tabId) => {
   if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");
@@ -444,7 +444,8 @@ const localCandidate = (field, profile) => {
   }) : [];
   return matches.length === 1 ? matches[0] : uniqueAnchorOption(value, options);
 };
-const isCascadeField = (field) => /城市|地点|地区|所在地/.test(fieldLabel(field));
+const isCascadeField = (field) => !!field && !field.isMultiSelector && field.optionSource !== "native"
+  && (!!field.hasConfirmation || /城市|地点|地区|所在地|行业|职业|职位|岗位/.test(fieldLabel(field)));
 const committedCascadeCandidate = (value, source) => {
   const candidate = choiceToken(value); const wanted = choiceToken(source);
   const short = (text) => text.replace(/(?:特别行政区|自治区|省|市|区|县)$/g, "");
@@ -457,6 +458,23 @@ const localCandidateAssignments = (fields, profile) => fields.flatMap((field) =>
   // A unique province is only a navigation step, not a committed city value.
   if (isCascadeField(field) && !committedCascadeCandidate(value, source)) return [];
   return value ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1 }] : [];
+});
+const cascadeCandidateAssignments = (fields, profile) => fields.flatMap((field) => {
+  const value = localCandidate(field, profile);
+  return value ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1, sourceValue: aiFieldContext(field, profile).sourceValue, local: true }] : [];
+});
+// Searchable industry/job cascades can resolve a leaf directly even when its
+// broad parent is not lexically present in the first pane. Never do this for
+// locations: a full "province + city" search is ambiguous across portals.
+const searchableCascadeAssignments = (fields, profile, occupied = new Set()) => fields.flatMap((field) => {
+  const value = aiFieldContext(field, profile).sourceValue;
+  return field?.hasSearch && !occupied.has(field.key) && /行业|职业|职位|岗位/.test(fieldLabel(field)) && value
+    ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1, sourceValue: value, searchFallback: true }] : [];
+});
+const searchableSelectorAssignments = (fields, profile, occupied = new Set()) => fields.flatMap((field) => {
+  const value = localCandidate(field, profile) || aiFieldContext(field, profile).sourceValue;
+  return field?.isMultiSelector && field.hasSearch && !occupied.has(field.key) && /城市|地点|地区|所在地|行业|职业|职位|岗位/.test(fieldLabel(field)) && value
+    ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1, sourceValue: value, local: true }] : [];
 });
 const cascadeChildOptions = (options, parentOptions) => (options || []).filter((option) => !parentOptions.has(choiceToken(option)));
 const retryFieldKeys = (scannedFields, filled) => new Set(filled ? (scannedFields || [])
@@ -554,10 +572,14 @@ $("ai").addEventListener("click", async () => {
       const unreadChoices = scannedFields.filter((field) => ["popup", "popup-not-found"].includes(field.optionSource) && !field.options?.length)
         .map((field) => ({ key: field.key, label: field.label, optionCount: 0, optionSource: field.optionSource, reason: field.optionSource === "popup-not-found" ? "candidate-not-read" : "options-unavailable" }));
       if (!liveFields.length) { aiDiagnostics.push({ pass: pass + 1, fields: [], model: [...baseDiagnostics, ...unreadChoices], apply: [] }); break; }
-      const local = await sendToFrame(tab.id, target.frameId, { type: "APPLY_ASSIGNMENTS", assignments: localCandidateAssignments(liveFields, profile) });
+      const localCascade = cascadeCandidateAssignments(liveFields.filter(isCascadeField), profile);
+      const localCascadeKeys = new Set(localCascade.map((item) => item.key));
+      const localAssignments = localCandidateAssignments(liveFields.filter((field) => !localCascadeKeys.has(field.key) && !field.isMultiSelector), profile);
+      const directSearch = searchableSelectorAssignments(liveFields, profile, new Set(localAssignments.map((item) => item.key)));
+      const local = await sendToFrame(tab.id, target.frameId, { type: "APPLY_ASSIGNMENTS", assignments: [...localAssignments, ...directSearch] });
       candidateFilled += local.filled || 0;
       const locallyFilled = new Set((local.diagnostics || []).filter((item) => item.reason === "filled").map((item) => item.key));
-      const aiFields = liveFields.filter((field) => !locallyFilled.has(field.key));
+      const aiFields = liveFields.filter((field) => !locallyFilled.has(field.key) && !localCascadeKeys.has(field.key));
       let result = { assignments: [], diagnostics: [] };
       if (aiFields.length) {
         const response = await fetch("http://127.0.0.1:8787/match", {
@@ -566,9 +588,10 @@ $("ai").addEventListener("click", async () => {
         result = await response.json();
         if (!response.ok) throw new Error(result.error || "AI 服务返回错误");
       }
-      const fieldFor = (assignment) => aiFields.find((field) => field.key === assignment.key || field.index === assignment.index);
-      const cascadeAssignments = (result.assignments || []).filter((assignment) => isCascadeField(fieldFor(assignment)))
+      const fieldFor = (assignment) => liveFields.find((field) => field.key === assignment.key || field.index === assignment.index);
+      const aiCascade = (result.assignments || []).filter((assignment) => isCascadeField(fieldFor(assignment)))
         .map((assignment) => ({ ...assignment, sourceValue: fieldFor(assignment)?.profileContext?.sourceValue || "" }));
+      const cascadeAssignments = [...localCascade, ...aiCascade, ...searchableCascadeAssignments(liveFields.filter(isCascadeField), profile, new Set([...localCascade, ...aiCascade].map((item) => item.key)))];
       const regularAssignments = (result.assignments || []).filter((assignment) => !isCascadeField(fieldFor(assignment)));
       let applied = { filled: 0, diagnostics: [] };
       let appliedAiFilled = 0;
@@ -584,35 +607,43 @@ $("ai").addEventListener("click", async () => {
       let model = Array.isArray(result.diagnostics) ? result.diagnostics : [];
       // A portal can keep only one cascading menu open. Finish one parent and
       // its child before opening the next, otherwise their child lists erase each other.
-      for (const assignment of cascadeAssignments) {
-        const field = fieldFor(assignment);
-        const parent = await sendToFrame(tab.id, target.frameId, { type: "APPLY_ASSIGNMENTS", assignments: [{ ...assignment, deferConfirm: true }] });
-        appendApplied(parent, new Set([assignment.key]));
-        if (!(parent.diagnostics || []).some((item) => item.reason === "cascade-parent-selected")) continue;
-        const parentOptions = new Set((field?.options || []).map(choiceToken));
-        const children = await sendToFrame(tab.id, target.frameId, { type: "GET_LIVE_OPTIONS", keys: [assignment.key], keepOpen: true, previousOptions: { [assignment.key]: [...parentOptions] } });
-        const child = uniqueEmptyFields(children.fields || []).find((item) => item.key === assignment.key);
-        const options = cascadeChildOptions(child?.options, parentOptions);
-        if (!options.length) {
-          const source = choiceToken(assignment.sourceValue);
-          if (source && source === choiceToken(assignment.value)) {
-            appendApplied(await sendToFrame(tab.id, target.frameId, { type: "APPLY_ASSIGNMENTS", assignments: [assignment] }), new Set([assignment.key]));
-          } else {
-            applied.diagnostics.push({ key: assignment.key, label: assignment.label, value: assignment.value, optionCount: child?.options?.length || 0, optionSource: child?.optionSource || "popup", reason: "cascade-child-options-not-read", choice: parent.diagnostics?.[0]?.choice });
+      for (const initial of cascadeAssignments) {
+        let assignment = initial;
+        let field = fieldFor(initial);
+        const seenOptions = new Set((field?.options || []).map(choiceToken));
+        for (let level = 1; assignment && level <= 6; level++) {
+          const step = await sendToFrame(tab.id, target.frameId, { type: "APPLY_ASSIGNMENTS", assignments: [{ ...assignment, deferConfirm: true }] });
+          const pending = (step.diagnostics || []).find((item) => item.reason === "cascade-parent-selected");
+          if (!pending) { appendApplied(step, assignment.local ? new Set() : new Set([assignment.key])); break; }
+          const children = await sendToFrame(tab.id, target.frameId, { type: "GET_LIVE_OPTIONS", keys: [assignment.key], keepOpen: true, previousOptions: { [assignment.key]: [...seenOptions] } });
+          const child = uniqueEmptyFields(children.fields || []).find((item) => item.key === assignment.key);
+          const options = cascadeChildOptions(child?.options, seenOptions);
+          pending.cascade = { level, options: field?.options || [], selected: assignment.value, childOptionsUpdated: !!options.length, childOptions: options };
+          appendApplied(step, assignment.local ? new Set() : new Set([assignment.key]));
+          if (!options.length) {
+            const final = await sendToFrame(tab.id, target.frameId, { type: "APPLY_ASSIGNMENTS", assignments: [{ ...assignment, deferConfirm: false }] });
+            for (const item of final.diagnostics || []) item.cascade = { ...pending.cascade, finalLeaf: assignment.value, confirmFound: !!item.choice?.confirmFound, confirmedValue: item.actual || item.choice?.afterConfirm || "" };
+            appendApplied(final, assignment.local ? new Set() : new Set([assignment.key]));
+            break;
           }
-          continue;
+          options.map(choiceToken).forEach((option) => seenOptions.add(option));
+          const childField = { ...child, options, optionCount: options.length, profileContext: aiFieldContext(child, profile) };
+          const localValue = localCandidate(childField, profile);
+          let next = localValue ? { key: childField.key, index: childField.index, label: childField.label, value: localValue, confidence: 1, sourceValue: childField.profileContext?.sourceValue || "", local: true } : null;
+          if (!next) {
+            const response = await fetch("http://127.0.0.1:8787/match", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile, fields: [childField] }) });
+            const childResult = await response.json();
+            if (!response.ok) throw new Error(childResult.error || "AI 服务返回错误");
+            model = [...model, ...(childResult.diagnostics || [])];
+            next = childResult.assignments?.[0] && { ...childResult.assignments[0], sourceValue: childField.profileContext?.sourceValue || "" };
+          }
+          if (!next) {
+            applied.diagnostics.push({ key: assignment.key, label: assignment.label, value: assignment.value, optionCount: options.length, optionSource: child?.optionSource || "popup", reason: "cascade-child-options-not-read", cascade: pending.cascade });
+            break;
+          }
+          assignment = next;
+          field = childField;
         }
-        const childField = { ...child, options, optionCount: options.length, profileContext: aiFieldContext(child, profile) };
-        const localChild = localCandidateAssignments([childField], profile);
-        let childResult = { assignments: [], diagnostics: [] };
-        if (!localChild.length) {
-          const response = await fetch("http://127.0.0.1:8787/match", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile, fields: [childField] }) });
-          childResult = await response.json();
-          if (!response.ok) throw new Error(childResult.error || "AI 服务返回错误");
-          model = [...model, ...(childResult.diagnostics || [])];
-        }
-        const childAssignments = localChild.length ? localChild : childResult.assignments || [];
-        if (childAssignments.length) appendApplied(await sendToFrame(tab.id, target.frameId, { type: "APPLY_ASSIGNMENTS", assignments: childAssignments }), new Set((childResult.assignments || []).map((item) => item.key)));
       }
       const resolvedKeys = new Set([...(local.diagnostics || []), ...(applied.diagnostics || [])].filter((item) => item.reason === "filled").map((item) => item.key));
       model = model.filter((item) => item.reason !== "ai-no-assignment" || !resolvedKeys.has(item.key));
