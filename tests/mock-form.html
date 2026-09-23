@@ -23,7 +23,8 @@
     const ui = new URLSearchParams(location.search).get("ui") || "native";
     const component = ui === "component";
     const misleading = ui === "phoenix-misleading";
-    const phoenix = ui === "phoenix" || misleading;
+    const yearTitlePhoenix = ui === "phoenix-year-title";
+    const phoenix = ui === "phoenix" || misleading || yearTitlePhoenix;
     const item = (label, control) => component
       ? `<div class="ant-form-item"><div class="ant-form-item-label"><label>${label}</label></div><div class="ant-form-item-control">${control}</div></div>`
       : phoenix ? `<div class="form-item"><div class="form-item__label">${label}</div><div class="form-item__control">${control}</div></div>`
@@ -49,7 +50,7 @@
     const nestPhoenix = (body) => phoenix ? `${'<div class="deep-row">'.repeat(9)}${body}${'</div>'.repeat(9)}` : body;
     const row = (kind, index) => `<div class="repeat-row" data-kind="${kind}">${nestPhoenix(
       kind === "education" ? dateRange("就读时间", kind, index) + input("学校名称", `${kind}School${index}`) + input("专业名称", `${kind}Major${index}`) + select("学历", `${kind}Degree${index}`, ["本科", "硕士"])
-      : kind === "work" ? dateRange("起止时间", kind, index) + select(index === 1 ? "月薪（税前）" : "税前月薪", `${kind}Salary${index}`, ["2001～4000", "8001～10000"], "", component && index === 2) + select(index === 1 ? "工作地点" : "办公地点", `${kind}City${index}`, ["广州", "深圳"]) + input("公司名称", `${kind}Company${index}`) + input("所在部门", `${kind}Department${index}`) + input("职位名称", `${kind}Title${index}`)
+      : kind === "work" ? (yearTitlePhoenix ? month("开始时间", `${kind}Start${index}`) + month("结束时间", `${kind}End${index}`) : dateRange("起止时间", kind, index)) + select(index === 1 ? "月薪（税前）" : "税前月薪", `${kind}Salary${index}`, ["2001～4000", "8001～10000"], "", component && index === 2) + select(index === 1 ? "工作地点" : "办公地点", `${kind}City${index}`, ["广州", "深圳"]) + input("公司名称", `${kind}Company${index}`) + input("所在部门", `${kind}Department${index}`) + input("职位名称", `${kind}Title${index}`)
       : kind === "project" ? input("项目名称", `${kind}Name${index}`) + input("职务", `${kind}Role${index}`) + month("开始时间", `${kind}Start${index}`) + month("结束时间", `${kind}End${index}`) + item("项目描述", `<textarea id="${kind}Description${index}"></textarea>`)
       : kind === "cadre" ? dateRange("起止时间", kind, index) + input("职务", `${kind}Position${index}`) + item("工作职责", `<textarea id="${kind}Duty${index}"></textarea>`)
       : kind === "skill" ? input("技能名称", `${kind}Name${index}`) + select("掌握程度", `${kind}Proficiency${index}`, ["了解", "一般", "熟练", "精通"], "", component) + input("使用时间总计", `${kind}Duration${index}`) + item("技能描述", `<textarea id="${kind}Description${index}"></textarea>`)
@@ -92,11 +93,19 @@
       const combobox = event.target.closest("[role=combobox]");
       if (combobox?.nextElementSibling?.getAttribute("role") === "listbox") { const list = combobox.nextElementSibling; const plainConfirm = combobox.closest(".phoenix-select, .mock-cascade")?.querySelector(".plain-confirm"); list.hidden = !list.hidden; if (plainConfirm) plainConfirm.hidden = list.hidden; combobox.setAttribute("aria-expanded", String(!list.hidden)); }
       const picker = phoenix && event.target.closest(".phoenix-select__input");
-      if (picker && !document.querySelector(".phoenix-calendar-month-panel")) document.body.insertAdjacentHTML("beforeend", `<div class="phoenix-calendar-month-panel" data-for="${picker.id}" data-year="2026" style="position:fixed;left:20px;top:20px;background:white"><button class="phoenix-calendar-month-panel-prev-year-btn" type="button"></button><button class="phoenix-calendar-month-panel-year-select" type="button">2026</button><button class="phoenix-calendar-month-panel-next-year-btn" type="button"></button><div role="grid">${Array.from({length:12},(_,i)=>`<div role="gridcell">${i+1}月</div>`).join("")}</div></div>`);
+      if (picker && !document.querySelector("[data-month-panel]")) {
+        document.querySelector("[data-unrelated-popup]")?.remove();
+        if (yearTitlePhoenix) document.body.insertAdjacentHTML("beforeend", `<div data-month-header style="position:fixed;left:20px;top:20px;background:white"><button data-year-title type="button">2026 年</button></div><div class="mock-floating-layer" data-month-panel data-for="${picker.id}" data-year="2026" style="position:fixed;left:20px;top:50px;background:white">${'<div class="mock-date-depth">'.repeat(9)}<div role="grid">${Array.from({length:12},(_,i)=>`<span data-month>${i+1} 月</span>`).join("")}</div>${'</div>'.repeat(9)}</div>`);
+        else document.body.insertAdjacentHTML("beforeend", `<div class="phoenix-calendar-month-panel" data-month-panel data-for="${picker.id}" data-year="2026" style="position:fixed;left:20px;top:20px;background:white"><button class="phoenix-calendar-month-panel-prev-year-btn" type="button"></button><button class="phoenix-calendar-month-panel-year-select" data-year-title type="button">2026</button><button class="phoenix-calendar-month-panel-next-year-btn" type="button"></button><div class="mock-panel-body"><div role="grid">${Array.from({length:12},(_,i)=>`<div role="gridcell" data-month>${i+1}月</div>`).join("")}</div></div></div>`);
+      }
       const panelButton = event.target.closest(".phoenix-calendar-month-panel-prev-year-btn, .phoenix-calendar-month-panel-next-year-btn");
-      if (panelButton) { const panel = panelButton.closest(".phoenix-calendar-month-panel"); panel.dataset.year = String(Number(panel.dataset.year) + (panelButton.className.includes("prev") ? -1 : 1)); panel.querySelector(".phoenix-calendar-month-panel-year-select").textContent = panel.dataset.year; }
-      const monthCell = event.target.closest("[role=gridcell]");
-      if (monthCell) { const panel = monthCell.closest(".phoenix-calendar-month-panel"); const target = document.getElementById(panel.dataset.for); target.value = `${panel.dataset.year}-${String(parseInt(monthCell.textContent, 10)).padStart(2, "0")}`; target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true })); panel.remove(); }
+      if (panelButton) { const panel = panelButton.closest("[data-month-panel]"); panel.dataset.year = String(Number(panel.dataset.year) + (panelButton.className.includes("prev") ? -1 : 1)); panel.querySelector(".phoenix-calendar-month-panel-year-select").textContent = panel.dataset.year; }
+      const yearTitle = yearTitlePhoenix && event.target.closest("[data-year-title]");
+      if (yearTitle) document.querySelector("[data-month-panel]").querySelector("[role=grid]").innerHTML = Array.from({length:11},(_,i)=>`<span data-year-option>${2020+i} 年</span>`).join("");
+      const yearOption = event.target.closest("[data-year-option]");
+      if (yearOption) { const panel = yearOption.closest("[data-month-panel]"); panel.dataset.year = yearOption.textContent.replace(/\D/g, ""); document.querySelector("[data-year-title]").textContent = `${panel.dataset.year} 年`; panel.querySelector("[role=grid]").innerHTML = Array.from({length:12},(_,i)=>`<span data-month>${i+1} 月</span>`).join(""); }
+      const monthCell = event.target.closest("[data-month]");
+      if (monthCell) { const panel = monthCell.closest("[data-month-panel]"); const target = document.getElementById(panel.dataset.for); target.value = `${panel.dataset.year}-${String(parseInt(monthCell.textContent, 10)).padStart(2, "0")}`; target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true })); panel.remove(); document.querySelector("[data-month-header]")?.remove(); }
       const option = event.target.closest("[role=option], .plain-choice");
       if (option) { const list = option.closest("[role=listbox]"); if (option.hasAttribute("data-rerender-parent") && !event.target.closest("[data-select-marker]")) list.innerHTML = '<div role="option" data-rerender-final><span class="mock-selection-icon" data-select-marker><svg class="area-icon-RadioUnchecked"></svg></span><span>深圳市</span><span class="mock-arrow"></span></div>'; else if (option.hasAttribute("data-rerender-final")) list.dataset.pending = option.textContent.trim(); else if (option.hasAttribute("data-cascade-parent")) list.replaceChildren(Object.assign(document.createElement("div"), { role: "option", textContent: "广州市" })); else { const applyOption = () => { const control = list?.previousElementSibling; if (control?.matches("input")) { control.value = option.textContent; control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } else if (control) { control.querySelector(".ant-select-selection-item").textContent = option.textContent; control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } if (list && !option.matches("[data-search-result]")) list.hidden = true; }; component ? setTimeout(applyOption, 220) : applyOption(); } }
       const add = event.target.closest("[data-add]");
@@ -124,6 +133,30 @@
   <script src="../content.js?v=date-range-22"></script>
   <script>
     (async () => {
+      if (yearTitlePhoenix) {
+        const profile = {
+          work: [{ company: "日期定位公司", start: "2025-08", end: "2026-01", salary: "3500", location: "广州" }],
+          projects: [{ name: "年份标题项目", start: "2025-06", end: "2027-06" }, { name: "开始日期失败项目", start: "2019-06", end: "2028-06" }]
+        };
+        document.querySelector("#workStart1").value = "2026-08";
+        document.querySelector("#projectStart1").value = "2026-06";
+        document.querySelector("#projectEnd1").value = "2026-06";
+        document.body.insertAdjacentHTML("beforeend", '<div role="listbox" data-unrelated-popup style="position:fixed"><div role="option">残留候选</div></div>');
+        const report = await globalThis.__resumeAutofillTest.fill(profile, { onlyEmpty: true });
+        const workStart = document.querySelector("#workStart1")?.value;
+        const workEnd = document.querySelector("#workEnd1")?.value;
+        const start = document.querySelector("#projectStart1")?.value;
+        const end = document.querySelector("#projectEnd1")?.value;
+        const passed = workStart === "2025-08" && workEnd === "2026-01" && start === "2025-06" && end === "2027-06"
+          && report.diagnostics?.structuredAttempts?.some((item) => item.section === "工作经历" && item.row === 1 && item.label === "结束时间" && item.reason === "filled" && item.targetLabel === "结束时间")
+          && !document.querySelector("#projectEnd2")?.value
+          && report.diagnostics?.structuredAttempts?.some((item) => item.section === "项目经验" && item.row === 1 && item.label === "结束时间" && item.reason === "filled")
+          && report.diagnostics?.structuredAttempts?.some((item) => item.section === "项目经验" && item.row === 2 && item.label === "结束时间" && item.reason === "start-date-not-confirmed");
+        const output = document.querySelector("#result");
+        output.className = passed ? "pass" : "fail";
+        output.textContent = `${passed ? "PASS" : "FAIL"} ${ui}\n工作 ${workStart} → ${workEnd}\n项目 ${start} → ${end}\n${JSON.stringify(report, null, 2)}`;
+        return;
+      }
       const experienceRows = [
         { company: "甲公司", department: "研发部", title: "前端开发实习生", start: "2024-01", end: "2024-02", salary: "3500", location: "广州" },
         { company: "乙公司", department: "产品部", title: "产品实习生", start: "2024-03", end: "2024-04", salary: "10000", location: "深圳" }

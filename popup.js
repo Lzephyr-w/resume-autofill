@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
 const emptyProfile = () => ({
-  name: "", phone: "", email: "", gender: "", birthDate: "", nationality: "", politicalStatus: "", wechat: "", nativePlace: "", currentResidence: "", householdRegistration: "",
+  name: "", phone: "", email: "", gender: "", birthDate: "", nationality: "", politicalStatus: "", wechat: "", nativePlace: "", currentResidence: "", householdRegistration: "", workExperience: "",
   jobIntent: { industry: "", occupation: "", currentSalary: "", expectedSalary: "", city: "", arrival: "" },
   education: [], experiences: [], work: [], internships: [], projects: [], cadres: [], skills: [], languages: [], certificates: [], awards: [], customFields: {}, extras: { hobbies: "", specialty: "", selfEvaluation: "", skills: "", languages: "", awards: "", studentCadres: "" }
 });
@@ -48,7 +48,7 @@ function awardsFromText(value) {
 
 const aliases = {
   name: ["姓名", "名字"], phone: ["手机", "手机号", "电话", "联系电话"], email: ["邮箱", "电子邮箱", "email"],
-  gender: ["性别"], birthDate: ["出生日期", "生日"], nationality: ["国籍", "民族"], politicalStatus: ["政治面貌"], wechat: ["微信号"], nativePlace: ["籍贯"], currentResidence: ["现居住地", "当前居住地", "现居地", "居住地"],
+  gender: ["性别"], birthDate: ["出生日期", "生日"], nationality: ["国籍", "民族"], politicalStatus: ["政治面貌"], wechat: ["微信号"], nativePlace: ["籍贯"], currentResidence: ["现居住地", "当前居住地", "现居地", "居住地"], workExperience: ["工作经验", "工作年限", "经验年限"],
   city: ["期望工作城市", "工作城市", "意向城市"], arrival: ["到岗时间", "入职时间"],
   expectedSalary: ["期望月薪", "期望薪资"], currentSalary: ["现月薪", "当前薪资"],
   industry: ["期望从事行业", "意向行业"], occupation: ["期望从事职业", "意向职位"],
@@ -62,7 +62,7 @@ const aliases = {
 function cleanProfile(input) {
   const base = emptyProfile();
   const p = input || {};
-  ["name", "phone", "email", "gender", "birthDate", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration"].forEach((key) => {
+  ["name", "phone", "email", "gender", "birthDate", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience"].forEach((key) => {
     if (p[key] != null) base[key] = String(p[key]).trim();
   });
   const legacyIntentKeys = {
@@ -126,7 +126,7 @@ function cleanProfile(input) {
   base.customFields = Object.fromEntries(Object.entries(p.customFields || {})
     .map(([key, value]) => [String(key).trim(), String(value ?? "").trim()])
     .filter(([key, value]) => key && value));
-  const standard = new Set(["name", "phone", "email", "gender", "birthDate", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "jobIntent", "education", "experiences", "work", "internships", "projects", "cadres", "skills", "languages", "certificates", "awards", "customFields", "extras"]);
+  const standard = new Set(["name", "phone", "email", "gender", "birthDate", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience", "jobIntent", "education", "experiences", "work", "internships", "projects", "cadres", "skills", "languages", "certificates", "awards", "customFields", "extras"]);
   Object.entries(p).forEach(([key, value]) => {
     if (!standard.has(key) && value != null && typeof value !== "object" && String(value).trim()) base.customFields[key] = String(value).trim();
   });
@@ -292,6 +292,7 @@ function parseText(text) {
   p.politicalStatus = findValue(lines, aliases.politicalStatus);
   p.wechat = findValue(lines, aliases.wechat); p.nativePlace = findValue(lines, aliases.nativePlace);
   p.currentResidence = findValue(lines, aliases.currentResidence);
+  p.workExperience = findValue(lines, aliases.workExperience);
   p.customFields = customFieldsFromLines(lines);
   p.jobIntent.city = findValue(lines, aliases.city); p.jobIntent.arrival = findValue(lines, aliases.arrival);
   p.jobIntent.expectedSalary = findValue(lines, aliases.expectedSalary);
@@ -356,6 +357,12 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
+const CONTENT_MESSAGE_SUFFIX = "_V3";
+const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
+const injectCurrentContent = (tabId) => {
+  if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");
+  return chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ["content.js"] });
+};
 const isWebPage = (url) => /^https?:\/\//i.test(url || "");
 const proxyUrl = "http://127.0.0.1:8787";
 function responseOrThrow(result) { if (result?.error) throw new Error(result.error); return result; }
@@ -471,7 +478,7 @@ async function formFrame(tabId) {
     } catch (_) { /* ponytail: main-frame fallback for restricted tabs */ }
     for (const frameId of frameIds) {
       try {
-        const schema = responseOrThrow(await chrome.tabs.sendMessage(tabId, { type: "GET_FORM_SCHEMA" }, { frameId }));
+        const schema = responseOrThrow(await chrome.tabs.sendMessage(tabId, contentMessage({ type: "GET_FORM_SCHEMA" }), { frameId }));
         if (!fallback || schemaScore(schema) > schemaScore(fallback.schema)) fallback = { frameId, schema };
       } catch (error) { lastError = error; }
     }
@@ -483,7 +490,7 @@ async function formFrame(tabId) {
 }
 
 function sendToFrame(tabId, frameId, message) {
-  return chrome.tabs.sendMessage(tabId, message, { frameId }).then(responseOrThrow);
+  return chrome.tabs.sendMessage(tabId, contentMessage(message), { frameId }).then(responseOrThrow);
 }
 
 async function load() {
@@ -521,6 +528,7 @@ $("ai").addEventListener("click", async () => {
   try {
     message("正在读取表单字段并请求 AI 匹配…", false, "ai-status");
     const profile = await saveManualProfile(false);
+    await injectCurrentContent(tab.id);
     const target = await formFrame(tab.id);
     // Deterministic structured fill is the source of truth. AI only handles
     // fields that remain unresolved after real page choices are attempted.
@@ -637,7 +645,7 @@ $("ai").addEventListener("click", async () => {
       .filter((item) => item.reason && !["accepted", "filled", "profile-value-missing"].includes(item.reason))
       .sort((a, b) => (failurePriority[a.reason] ?? 4) - (failurePriority[b.reason] ?? 4))
       .filter((item) => { const key = item.key || item.label; if (!key || seenFailures.has(key)) return false; seenFailures.add(key); return true; }).slice(0, 3);
-    const reasonText = { "popup-not-found": "未找到弹层", "candidate-not-read": "候选未读取", "cascade-child-options-not-read": "父级后未读到子级候选", "options-unavailable": "候选为空", "not-a-page-option": "候选校验拒绝", "ai-no-assignment": "AI未返回", "page-option-or-validation-failed": "点击后页面未确认", "low-confidence": "AI置信度不足", "unknown-field": "字段未定位", "field-not-found": "字段未定位", "cascade-parent-selected": "子级候选未确认", "profile-value-missing": "本地档案未提供", "deferred-to-ai": "已交给候选 AI", "page-value-protected": "已有值保护" };
+    const reasonText = { "popup-not-found": "未找到弹层", "candidate-not-read": "候选未读取", "cascade-child-options-not-read": "父级后未读到子级候选", "options-unavailable": "候选为空", "not-a-page-option": "候选校验拒绝", "ai-no-assignment": "AI未返回", "page-option-or-validation-failed": "点击后页面未确认", "low-confidence": "AI置信度不足", "unknown-field": "字段未定位", "field-not-found": "字段未定位", "cascade-parent-selected": "子级候选未确认", "profile-value-missing": "本地档案未提供", "deferred-to-ai": "已交给候选 AI", "page-value-protected": "已有值保护", "start-date-not-confirmed": "开始日期未确认，已跳过结束日期" };
     const structuralSalary = allDiagnostics.structured.find((item) => item.label === "月薪(税前)" && item.row === 2 && !["filled", "deferred-to-ai"].includes(item.reason));
     const choiceText = structuralSalary?.choice ? (structuralSalary.choice.optionFound ? `（候选“${structuralSalary.choice.option}”，点击后“${structuralSalary.choice.afterConfirm || structuralSalary.choice.afterClick || "空"}”）` : "（未找到3500对应候选）") : "";
     const structuralText = structuralSalary ? `；第2条经历月薪：${reasonText[structuralSalary.reason] || structuralSalary.reason}${choiceText}` : "";
@@ -667,19 +675,26 @@ $("ai").addEventListener("click", async () => {
         : ["ai-no-assignment", "not-a-page-option", "candidate-not-read", "options-unavailable"].includes(item.reason) ? `（候选 ${item.optionCount || 0} 个${item.optionSource ? `，${item.optionSource}` : ""}）` : "";
       return `${item.label || item.key}:${reasonText[item.reason] || item.reason}${choice || detail}`;
     }).join("、")}` : "";
+    const dateFailures = allDiagnostics.structured.filter((item) => /开始时间|结束时间/.test(item.label) && !["filled", "page-value-protected"].includes(item.reason)).slice(0, 4);
+    const dateText = dateFailures.length ? `；日期选择诊断：${dateFailures.map((item) => {
+      const trace = item.choice || {}; const picker = trace.datePicker || {};
+      const year = picker.targetYear ? `${picker.currentYear || "?"}→${picker.targetYear}(${picker.yearMethod || "未选择"}${picker.yearOptionFound === false ? "/无候选" : ""})` : "未识别";
+      const month = picker.month ? `${picker.month}月${picker.monthFound ? "已点击" : "未找到"}` : "未识别";
+      return `${item.section}[${item.row}].${item.label}:${reasonText[item.reason] || item.reason}（协议 ${picker.protocol ? `V${picker.protocol}` : "旧版"}，路径 ${trace.path || "无"}，弹层 ${picker.panelFound ? "年月" : picker.popupCount ? "非年月" : "无"}，年份 ${year}，月份 ${month}，显示“${picker.after || item.actual || trace.afterConfirm || "空"}”${trace.failure ? `，${trace.failure}` : ""}）`;
+    }).join("；")}` : "";
     const absentProfile = [absentIntent, absentStructured].filter(Boolean).join("、");
-    message(`结构化填充 ${repaired.filled} 项，实时候选匹配 ${candidateFilled} 项，AI 补充 ${aiFilled} 项，保留页面原值 ${repaired.skippedFields?.length || 0} 项${remaining.length ? `；页面仍有 ${remaining.length} 个空字段${examples ? `（${examples}）` : ""}` : ""}${unresolvedText ? `；结构化未完成：${unresolvedText}` : ""}${unavailableText ? `；页面未提供：${unavailableText}` : ""}${absentProfile ? `；本地档案未提供：${absentProfile}` : ""}${structuralText}${awardText}${educationText}${diagnosticText}。请检查后自行提交。`, false, "ai-status");
+    message(`结构化填充 ${repaired.filled} 项，实时候选匹配 ${candidateFilled} 项，AI 补充 ${aiFilled} 项，保留页面原值 ${repaired.skippedFields?.length || 0} 项${remaining.length ? `；页面仍有 ${remaining.length} 个空字段${examples ? `（${examples}）` : ""}` : ""}${unresolvedText ? `；结构化未完成：${unresolvedText}` : ""}${unavailableText ? `；页面未提供：${unavailableText}` : ""}${absentProfile ? `；本地档案未提供：${absentProfile}` : ""}${structuralText}${awardText}${educationText}${dateText}${diagnosticText}。请检查后自行提交。`, false, "ai-status");
   } catch (error) {
     const detail = String(error.message || error);
     if (detail.includes("Failed to fetch")) { $("ai-status").textContent = ""; $("ai-status").className = ""; message("配置已保存，但本地 Node 代理未启动。请先运行 README 中的 node 命令。", false, "connect-status", "hint"); }
-    else message(detail.includes("Receiving end does not exist") ? "插件脚本未注入当前页面，请重新加载插件并刷新网页。" : detail, true, "ai-status");
+    else message(detail.includes("Receiving end does not exist") ? "插件脚本未注入当前页面，请重新加载插件后重试。" : detail, true, "ai-status");
   }
 });
 
 const MANUAL_STORAGE_KEY = "applicationFormData";
 const MANUAL_SINGLE_FIELD_IDS = [
   "fullName", "gender", "phone", "email", "birthDate", "idType", "idNumber", "nativePlace",
-  "wechat", "nationality", "politicalStatus", "currentResidence", "householdRegistration", "intentIndustry", "intentOccupation", "intentCurrentSalary", "intentExpectedSalary", "intentCity", "intentArrival", "skills", "selfEvaluation"
+  "wechat", "nationality", "politicalStatus", "currentResidence", "householdRegistration", "workExperience", "intentIndustry", "intentOccupation", "intentCurrentSalary", "intentExpectedSalary", "intentCity", "intentArrival", "skills", "selfEvaluation"
 ];
 const REPEAT_GROUPS = {
   educations: { firstId: "university", label: "教育经历", addLabel: "新增教育经历", fields: [["degree", "education"], ["training", "educationType"], ["school", "university"], ["college", "college"], ["major", "major"], ["start", "educationStart"], ["end", "graduationYear"], ["gpa", "gpa"]] },
@@ -798,7 +813,7 @@ function manualProfileFromForm(data) {
     name: data.fullName, phone: data.phone, email: data.email, gender: data.gender,
     birthDate: data.birthDate, nativePlace: data.nativePlace, wechat: data.wechat,
     nationality: data.nationality, politicalStatus: data.politicalStatus,
-    currentResidence: data.currentResidence, householdRegistration: data.householdRegistration,
+    currentResidence: data.currentResidence, householdRegistration: data.householdRegistration, workExperience: data.workExperience,
     education: educations,
     experiences, work, internships,
     jobIntent: { industry: data.intentIndustry, occupation: data.intentOccupation, currentSalary: data.intentCurrentSalary, expectedSalary: data.intentExpectedSalary, city: data.intentCity, arrival: data.intentArrival },
@@ -820,7 +835,7 @@ function manualFormFromProfile(profile) {
     idNumber: profile?.customFields?.证件号码, nativePlace: profile?.nativePlace,
     wechat: profile?.wechat, nationality: profile?.nationality, politicalStatus: profile?.politicalStatus,
     currentResidence: profile?.currentResidence,
-    householdRegistration: profile?.householdRegistration || profile?.customFields?.户口所在地,
+    householdRegistration: profile?.householdRegistration || profile?.customFields?.户口所在地, workExperience: profile?.workExperience,
     intentIndustry: profile?.jobIntent?.industry, intentOccupation: profile?.jobIntent?.occupation, intentCurrentSalary: profile?.jobIntent?.currentSalary,
     intentExpectedSalary: profile?.jobIntent?.expectedSalary, intentCity: profile?.jobIntent?.city, intentArrival: profile?.jobIntent?.arrival,
     educations: profile?.education || [],

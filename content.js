@@ -1,4 +1,7 @@
 (() => {
+  const CONTENT_PROTOCOL = 3;
+  if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
+  globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
   const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
   const editable = (el) => {
@@ -685,7 +688,7 @@
   };
   const logChoice = (stage, trace, state) => console.info(`[resume-autofill][choice] ${JSON.stringify({
     stage, label: trace?.label, value: trace?.value, option: trace?.option, commit: trace?.commit,
-    clickObserved: trace?.clickObserved, confirmed: trace?.confirmed, failure: trace?.failure, ...state
+    clickObserved: trace?.clickObserved, confirmed: trace?.confirmed, failure: trace?.failure, datePicker: trace?.datePicker, ...state
   })}`);
   const confirmationButton = (scope) => {
     const nodes = [...(scope?.querySelectorAll("button, [role=button], [data-confirm], [class*='button'], [class*='Button'], [class*='btn'], [class*='Btn']") || [])];
@@ -776,7 +779,7 @@
         });
         // Some range pickers leave the end controls anonymous.  Their stable
         // signal is four Selects beside a range separator, not placeholders.
-        if (ordered.length === 4 && /[-—–]/.test(text)) return ordered;
+        if (isDateRange && ordered.length === 4 && /[-—–]/.test(text)) return ordered;
         if (!nearestPair.length && ordered.every((el) => isYearPart(el) || isMonthPart(el))) nearestPair = ordered;
       }
       // Some forms expose date pickers as anonymous inputs (no placeholder,
@@ -788,6 +791,22 @@
       if (/(起止时间|就读时间|获奖时间|开始时间|结束时间|毕业时间|教育结束)/.test(text) && text.includes("-") && datePartsOnly.length === 4 && datePartsOnly.includes(target)) return datePartsOnly;
     }
     return nearestPair;
+  };
+  const dateValueMatches = (target, expected) => {
+    const [year, month] = dateParts(expected);
+    if (!year || !month) return false;
+    const controls = dateControls(target); const index = controls.indexOf(target);
+    if (index >= 0) {
+      const first = index - index % 2;
+      return Number(String(controlValue(controls[first])).replace(/\D/g, "")) === Number(year)
+        && Number(String(controlValue(controls[first + 1])).replace(/\D/g, "")) === Number(month);
+    }
+    const actual = dateParts(controlValue(target));
+    return actual[0] === year && actual[1] === month;
+  };
+  const hasWrongPickerYear = (target, expected) => {
+    const actual = dateParts(controlValue(target)); const wanted = dateParts(expected);
+    return actual[0] && actual[1] && wanted[0] && wanted[1] && actual[0] !== wanted[0] && actual[1] === wanted[1];
   };
   async function choose(label, value, target, skipDatePair = false, chooseOptions = {}) {
     const trace = lastChoice = {
@@ -835,40 +854,85 @@
       return numericMonthMatch || forms.some((form) => normalized === form || normalized.includes(form) || form.includes(normalized));
     };
     if (year && month && /(日期|时间)/.test(label)) {
-      // A plain year/month Select must stay on the regular one-click option
-      // path below.  Opening it here would toggle it closed before options
-      // are read; only explicit calendar controls need this branch.
-      // aria-haspopup means "has a popup", not "is a calendar": regular
-      // year/month dropdowns expose it too.  Route only explicit date pickers.
-      const dateControl = target && /date|month|picker|calendar/i.test(String(target.className || "")) ? target : null;
+      // Paired year/month Selects stay on the regular option path. A single
+      // custom control is a date picker only when its visible popup proves it.
+      const explicitDateControl = target && /date|month|picker|calendar/i.test(String(target.className || ""));
+      const dateControl = target && (explicitDateControl || !pairedControls.length) ? target : null;
       if (dateControl) {
         trace.path = "calendar";
-        dateControl.click();
+        if (!popupFor(dateControl, false).length) dateControl.click();
         await wait(80);
         const rect = dateControl.getBoundingClientRect();
-        const calendar = [...document.querySelectorAll("[role=grid]")].filter(visible).sort((a, b) => {
+        const popupRoots = () => popupFor(dateControl);
+        const popupNodes = () => [...new Set(popupRoots().flatMap((popup) => [popup, ...popup.querySelectorAll("*")]))].filter(visible);
+        const exactText = (node) => clean(node?.innerText || node?.textContent || node?.getAttribute?.("aria-label") || node?.getAttribute?.("title") || node?.getAttribute?.("data-value") || node?.getAttribute?.("value"));
+        const dateText = (node) => exactText(node).replace(/\s/g, "");
+        const exactNodes = (scope, pattern) => [...scope.querySelectorAll("*")].filter((node) => {
+          const text = dateText(node);
+          return visible(node) && pattern.test(text) && ![...node.children].some((child) => visible(child) && dateText(child) === text);
+        });
+        const visibleMonthNodes = [...new Set([...exactNodes(document.body, /^(?:[1-9]|1[0-2])月$/), ...popupRoots().flatMap(popupOptionNodes).filter((node) => /^(?:[1-9]|1[0-2])月$/.test(dateText(node)))])];
+        const visibleYearNodes = exactNodes(document.body, /^\d{4}年?$/);
+        const panelCandidates = [...new Set([...popupRoots(), ...visibleMonthNodes].flatMap((popup) => {
+          const parents = [];
+          for (let node = popup; node && node !== document.body; node = node.parentElement) parents.push(node);
+          return parents;
+        }))].filter(visible);
+        const monthPanelDetails = panelCandidates.map((panel) => {
+          const monthNodes = visibleMonthNodes.filter((node) => panel.contains(node));
+          const yearNodes = visibleYearNodes.filter((node) => panel.contains(node));
+          return { panel, monthNodes, yearTitle: yearNodes.find((node) => node.matches?.("button, [role=button], [title], [aria-label], [class*='year'], [class*='Year']")) || (yearNodes.length === 1 ? yearNodes[0] : null) };
+        }).filter(({ monthNodes, yearTitle }) => new Set(monthNodes.map(dateText)).size >= 6 && yearTitle).sort((a, b) => {
+          if (a.panel.contains(b.panel)) return 1;
+          if (b.panel.contains(a.panel)) return -1;
           const center = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - rect.left) + Math.abs(r.top - rect.top); };
-          return center(a) - center(b);
-        })[0];
-        const panel = [...document.querySelectorAll("[role=dialog], [class$='month-panel'], [class*='month-panel '], [class*='MonthPanel']")].filter((el) => visible(el) && el.querySelector("[role=grid]")).sort((a, b) => {
-          const center = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - rect.left) + Math.abs(r.top - rect.top); };
-          return center(a) - center(b);
-        })[0];
-        if (panel) {
-          const yearText = [...panel.querySelectorAll("[aria-label], [title], [class*='year'], [class*='Year'], button, span")]
-            .map((el) => clean(el.textContent || el.getAttribute("aria-label") || el.getAttribute("title")))
-            .find((text) => /^\d{4}$/.test(text));
-          const currentYear = Number(yearText);
+          return center(a.panel) - center(b.panel);
+        })[0] || (() => {
+          const roots = popupRoots();
+          const monthNodes = visibleMonthNodes.filter((node) => roots.some((root) => root === node || root.contains(node)));
+          if (new Set(monthNodes.map(dateText)).size < 6) return null;
+          const anchor = roots[0]?.getBoundingClientRect?.() || rect;
+          const distance = (node) => { const box = node.getBoundingClientRect(); return Math.abs(box.left - anchor.left) + Math.abs(box.top - anchor.top); };
+          const yearTitle = visibleYearNodes.filter((node) => distance(node) < 800).sort((a, b) => distance(a) - distance(b))[0];
+          return yearTitle ? { panel: roots[0], monthNodes, yearTitle } : null;
+        })();
+        const monthPanel = monthPanelDetails?.panel;
+        trace.datePicker = { protocol: CONTENT_PROTOCOL, popupCount: popupRoots().length, panelFound: !!monthPanel, monthCount: monthPanelDetails ? new Set(monthPanelDetails.monthNodes.map(dateText)).size : 0 };
+        if (monthPanel) {
+          const yearTitle = monthPanelDetails.yearTitle;
+          const currentYear = Number(dateText(yearTitle).match(/^\d{4}/)?.[0]);
           const targetYear = Number(year);
           const direction = targetYear < currentYear ? "prev" : "next";
-          for (let i = 0; i < Math.abs(targetYear - currentYear); i++) {
-            [...panel.querySelectorAll("button, [role=button]")].find((el) => `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`.match(new RegExp(`${direction}.*year`, "i")))?.click();
-            await wait(30);
-          }
-          const monthNode = [...panel.querySelectorAll("[role=gridcell], [role=option], button, [class*='month'], [class*='Month']")]
-            .find((el) => normalize(el.textContent) === normalize(`${Number(month)}月`) || normalize(el.textContent) === normalize(String(Number(month))));
-          if (monthNode) { monthNode.click(); await wait(40); await closeDatePicker(panel, dateControl); trace.confirmed = true; return true; }
+          const pickerNodes = () => [...new Set([monthPanel, ...monthPanel.querySelectorAll("*"), ...popupNodes()])].filter(visible);
+          const yearButton = () => pickerNodes().find((el) => el.matches?.("button, [role=button]") && `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`.match(new RegExp(`${direction}.*year`, "i")));
+          Object.assign(trace.datePicker, { currentYear, targetYear });
+          if (targetYear !== currentYear && yearButton()) {
+            trace.datePicker.yearMethod = direction;
+            for (let i = 0; i < Math.abs(targetYear - currentYear); i++) { yearButton()?.click(); await wait(30); }
+          } else if (targetYear !== currentYear && yearTitle) {
+            trace.datePicker.yearMethod = "title";
+            yearTitle.click();
+            const yearOption = await waitFor(() => pickerNodes().find((node) => [String(targetYear), `${targetYear}年`].includes(dateText(node))), 1400);
+            trace.datePicker.yearOptionFound = !!yearOption;
+            if (yearOption) { yearOption.click(); await wait(40); }
+          } else trace.datePicker.yearMethod = "already-current";
+          const monthNode = await waitFor(() => pickerNodes().find((node) => dateText(node) === `${Number(month)}月`), 1400);
+          trace.datePicker.month = Number(month);
+          trace.datePicker.monthFound = !!monthNode;
+          if (monthNode) monthNode.click();
+          await wait(40);
+          trace.confirmed = !!monthNode && !!await waitFor(() => dateValueMatches(dateControl, value), 800);
+          trace.selectedValue = value;
+          trace.datePicker.after = controlValue(dateControl);
+          if (!trace.confirmed) trace.failure = monthNode ? "display-not-confirmed" : "month-not-found";
+          logChoice("calendar", trace, choiceState(dateControl, monthPanel, monthNode));
+          await closeDatePicker(monthPanel, dateControl);
+          return trace.confirmed;
         }
+        const calendar = explicitDateControl && [...document.querySelectorAll("[role=grid]")].filter(visible).sort((a, b) => {
+          const center = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - rect.left) + Math.abs(r.top - rect.top); };
+          return center(a) - center(b);
+        })[0];
         if (calendar) {
           const currentYear = Number([...calendar.querySelectorAll("[aria-label], [title], [class*='year'], [class*='Year'], button, span")]
             .map((el) => clean(el.textContent || el.getAttribute("aria-label") || el.getAttribute("title"))).find((text) => /\d{4}/.test(text))?.match(/\d{4}/)?.[0]);
@@ -883,7 +947,13 @@
           const [, , day] = dateParts(value);
           if (day) {
             const dayNode = [...calendar.querySelectorAll("[role=gridcell], [role=option], button, [class*='cell'], [class*='Cell']")].find((el) => !/prev-month|next-month/i.test(String(el.className || "")) && normalize(el.textContent) === normalize(String(Number(day))));
-            if (dayNode) { dayNode.click(); await wait(40); await closeDatePicker(calendar, dateControl); trace.confirmed = true; return true; }
+            if (dayNode) {
+              dayNode.click(); await wait(40);
+              trace.confirmed = !!await waitFor(() => dateValueMatches(dateControl, value), 800);
+              if (!trace.confirmed) trace.failure = "display-not-confirmed";
+              await closeDatePicker(calendar, dateControl);
+              return trace.confirmed;
+            }
           }
           const calendarInput = calendar.querySelector("input[type=date], input[placeholder*='日期'], input[aria-label*='date' i]");
           if (calendarInput) {
@@ -891,9 +961,10 @@
             setValue(calendarInput, formatted);
             calendarInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
             await wait(40);
+            trace.confirmed = !!await waitFor(() => dateValueMatches(dateControl, value), 800);
+            if (!trace.confirmed) trace.failure = "display-not-confirmed";
             await closeDatePicker(calendar, dateControl);
-            trace.confirmed = true;
-            return true;
+            return trace.confirmed;
           }
         }
       }
@@ -1091,11 +1162,12 @@
     // Component state can render after its click handler returns. Verify the
     // displayed value before closing the popup, rather than cancelling it early.
     const autocomplete = isAutocompleteControl(control);
-    lastChoice.confirmed = !!await waitFor(() => valueMatches(readControl(), lastChoice.selectedValue || value, label)
+    const expectedDisplay = year && month && pairIndex < 0 ? value : lastChoice.selectedValue || value;
+    lastChoice.confirmed = !!await waitFor(() => valueMatches(readControl(), expectedDisplay, label)
       && (!autocomplete || !popup?.isConnected || !visible(popup)), 800);
     lastChoice.afterConfirm = readControl();
     if (!lastChoice.confirmed) {
-      lastChoice.failure = autocomplete && valueMatches(readControl(), lastChoice.selectedValue || value, label) ? "popup-still-open" : "display-not-confirmed";
+      lastChoice.failure = autocomplete && valueMatches(readControl(), expectedDisplay, label) ? "popup-still-open" : "display-not-confirmed";
       restoreChoiceSearch(control, lastChoice.before);
     }
     lastChoice.afterConfirmState = choiceState(committedControl || control, popup, commitTarget);
@@ -1219,7 +1291,7 @@
     const hasInternshipSection = hasSection("实习经历");
     const workRows = hasInternshipSection ? (profile.work || []) : allExperienceRows;
     const internshipRows = hasInternshipSection ? (profile.internships?.length ? profile.internships : (profile.work || []).filter((row) => /实习|intern/i.test(`${row?.workType || ""} ${row?.title || ""}`))) : [];
-    const simple = [["姓名", profile.name], ["手机号码", profile.phone], ["邮箱", profile.email], ["出生日期", profile.birthDate], ["民族", profile.nationality], ["政治面貌", profile.politicalStatus], ["户口所在地", profile.householdRegistration], ["籍贯", profile.nativePlace], ["现居住地", profile.currentResidence], ["微信号", profile.wechat], ["最近公司", allExperienceRows[0]?.company], ["当前就读学校学号", profile.education?.[0]?.studentId], ["兴趣爱好", profile.extras?.hobbies], ["特长", profile.extras?.specialty], ["个人评价", profile.extras?.selfEvaluation], ["获奖经历", profile.extras?.awards], ["学生干部经历", profile.extras?.studentCadres]];
+    const simple = [["姓名", profile.name], ["手机号码", profile.phone], ["邮箱", profile.email], ["出生日期", profile.birthDate], ["民族", profile.nationality], ["政治面貌", profile.politicalStatus], ["户口所在地", profile.householdRegistration], ["工作经验", profile.workExperience], ["籍贯", profile.nativePlace], ["现居住地", profile.currentResidence], ["微信号", profile.wechat], ["最近公司", allExperienceRows[0]?.company], ["当前就读学校学号", profile.education?.[0]?.studentId], ["兴趣爱好", profile.extras?.hobbies], ["特长", profile.extras?.specialty], ["个人评价", profile.extras?.selfEvaluation], ["获奖经历", profile.extras?.awards], ["学生干部经历", profile.extras?.studentCadres]];
     for (const [label, value] of simple) {
       if (!value) continue;
       const field = findField(label);
@@ -1306,6 +1378,7 @@
       for (let index = 0; index < (rows || []).length; index++) {
         const row = rows[index];
         const parts = anchor === "项目名称" ? projectParts(row) : null;
+        let startDateConfirmed = true;
         for (const [label, key] of mapping) {
           const value = key === "_exam" ? certificateExam(row?.name)
             : key === "_score" ? certificateScore(row)
@@ -1322,14 +1395,22 @@
           const fieldName = `${section}[${index + 1}].${label}`;
           const targetLabel = field ? (fieldTitle(field) || labelText(field)) : "";
           const detail = { section, row: index + 1, company: row?.company || "", label, value: String(value || ""), datePartCount: /时间/.test(label) ? dateParts(value).length : 0, dateControlCount: /时间/.test(label) && field ? dateControls(field).length : 0, targetIndex: field ? fields().indexOf(field) : -1, targetLabel, targetRepeatIndex: field ? repeatIndex(field, targetLabel) : -1 };
+          if (/结束时间/.test(label) && !startDateConfirmed) { structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "start-date-not-confirmed" }); continue; }
           if (!value) {
+            if (/开始时间/.test(label)) startDateConfirmed = false;
             if (/月薪|工作地点|获奖时间/.test(label)) diagnostics.structuredAttempts.push({ ...detail, reason: "profile-value-missing" });
             continue;
           }
-          if (onlyEmpty && field && controlValue(field) && !(forceWorkDescriptions && isWorkText)) { skippedFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "page-value-protected" }); continue; }
-          if (!field) { structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "field-not-found" }); continue; }
-          if (deferChoice(field)) { deferredFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "deferred-to-ai" }); continue; }
-          if (await applyValue(label, value, field)) { filled++; filledFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "filled", actual: controlValue(field), choice: lastChoice }); }
+          const repairWrongDate = /开始时间|结束时间/.test(label) && hasWrongPickerYear(field, value);
+          if (onlyEmpty && field && controlValue(field) && !(forceWorkDescriptions && isWorkText) && !repairWrongDate) {
+            if (/开始时间/.test(label)) startDateConfirmed = dateValueMatches(field, value);
+            skippedFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "page-value-protected" }); continue;
+          }
+          if (!field) { if (/开始时间/.test(label)) startDateConfirmed = false; structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "field-not-found" }); continue; }
+          if (deferChoice(field)) { if (/开始时间/.test(label)) startDateConfirmed = false; deferredFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "deferred-to-ai" }); continue; }
+          const applied = await applyValue(label, value, field);
+          if (/开始时间/.test(label)) startDateConfirmed = applied && dateValueMatches(field, value);
+          if (applied) { filled++; filledFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "filled", actual: controlValue(field), choice: lastChoice }); }
           else { structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "page-option-or-validation-failed", actual: controlValue(field), choice: lastChoice }); }
         }
       }
@@ -1354,7 +1435,10 @@
       FILL_PROFILE: () => fill(message.profile, message.options),
       APPLY_ASSIGNMENTS: () => applyAssignments(message.assignments)
     };
-    const task = tasks[message?.type];
+    const type = String(message?.type || "");
+    const suffix = `_V${CONTENT_PROTOCOL}`;
+    if (!type.endsWith(suffix)) return false;
+    const task = tasks[type.slice(0, -suffix.length)];
     if (!task) return false;
     Promise.resolve().then(task)
       .then(sendResponse)
