@@ -1,9 +1,13 @@
 (() => {
-  const CONTENT_PROTOCOL = 27;
+  const CONTENT_PROTOCOL = 51;
   if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
-  const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+  const visible = (el) => {
+    if (!el || getComputedStyle(el).visibility === "hidden") return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
   const editable = (el) => {
     if (!el) return false;
     const choice = el.type === "radio" || el.type === "checkbox" || el.getAttribute("role") === "radio" || el.getAttribute("role") === "checkbox";
@@ -361,7 +365,7 @@
     "获奖时间": ["获奖日期", "获得时间", "奖项时间", "获奖时间"],
     "奖项名称": ["获奖项", "奖励名称", "奖项", "奖项名称"],
     "获奖级别": ["奖项级别", "奖励级别", "获奖等级", "获奖级别"],
-    "籍贯": ["籍贯"],
+    "籍贯": ["籍贯", "家乡"],
     "户口所在地": ["户籍所在地", "户籍地", "户口所在地", "户籍地址"],
     "培养方式": ["学习方式", "就读方式", "受教育类型"],
     "工作描述": ["工作职责", "工作内容", "工作说明"],
@@ -369,7 +373,7 @@
     "工作亮点": ["工作成果", "业绩亮点", "工作成就"],
     "个人评价": ["个人评价", "自我评价", "自我描述"],
     "获奖情况": ["奖励活动", "获奖经历", "奖项"],
-    "现居住地": ["当前居住地", "当前所在地", "现居地", "居住地", "所在地"],
+    "现居住地": ["当前居住地", "当前所在地", "现居地", "居住地", "所在地", "所在地点"],
     "学历": ["学位", "最高学历"],
     "公司名称": ["企业名称", "单位名称", "公司/单位"],
     "职位名称": ["职位", "职务", "岗位", "工作岗位", "任职职位", "任职岗位"],
@@ -669,15 +673,18 @@
     const marker = text.search(/\s+(?=(?:负责|实现|构建|设计|开发|使用|参与|主导))/);
     return marker > 0 ? { summary: text.slice(0, marker).trim(), responsibilities: text.slice(marker).trim() } : { summary: text, responsibilities: "" };
   };
-  const clickOption = async (el, trusted = false, changed) => {
+  const clickOption = async (el, trusted = false, changed, record) => {
     if (!el) return false;
     if (trusted && globalThis.chrome?.runtime?.sendMessage) {
       const rect = el.getBoundingClientRect();
+      if (record) record.rect = { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
       try {
         const result = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_TRUSTED_CLICK", x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        if (record) record.trusted = result?.clicked === true;
         if (result?.clicked && (!changed || await waitFor(changed, 150))) return true;
-      } catch {}
+      } catch (error) { if (record) record.trustedError = String(error?.message || error); }
     }
+    if (record) record.fallback = true;
     const event = (type) => typeof PointerEvent === "function" && type.startsWith("pointer")
       ? new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", isPrimary: true })
       : new MouseEvent(type, { bubbles: true, cancelable: true });
@@ -894,9 +901,11 @@
     }
     const wanted = normalize(matchValue);
     const wantedForms = dateForms(matchValue).map(normalize);
+    const areaName = (text) => normalize(text).replace(/(?:特别行政区|自治区|自治州|省|市|地区|盟|区|县)$/g, "");
+    const sameArea = (left, right) => areaName(left) === areaName(right);
     const optionForms = [matchValue,
       /获奖级别/.test(label) && String(value).replace(/院级|校级/, "院校级").replace(/省级/, "省区级").replace(/市级/, "县市级"),
-      /籍贯|居住地|户籍|户口/.test(label) && String(value).replace(/[\/／]/g, "")
+      /家乡|籍贯|居住地|户籍|户口|所在地点|所在地/.test(label) && String(value).replace(/[\/／]/g, "")
     ].filter(Boolean).map(normalize);
     // Month-only controls on this page expose 8/1 instead of 08/01.
     const numericMonth = monthControl && String(Number(month || value));
@@ -1069,7 +1078,7 @@
       }, 1400);
       if (found) popup = found;
     };
-    const isLocationPicker = /籍贯|居住地|户籍|户口|(?:工作|期望).*(?:地点|城市)/.test(label);
+    const isLocationPicker = /家乡|籍贯|居住地|户籍|户口|所在地点|所在地|(?:工作|期望).*(?:地点|城市)/.test(label);
     const search = [popup?.querySelector("input:not([type=hidden])"), target].find((el) => el?.tagName === "INPUT" && !el.readOnly);
     // A salary search box filters by displayed range text; searching a raw
     // number such as 3500 hides “2001 ~ 4000”. Match ranges from real options.
@@ -1083,7 +1092,7 @@
     if (isLocationPicker) {
       const location = String(value).trim().match(/^(.+?(?:省|自治区|特别行政区|市))[\/／,，\s-]*(.+?(?:市|区|县))$/);
       const areaPopup = await waitFor(() => [popup, ...openDropdowns(), ...document.querySelectorAll("[role=dialog], [class*='area'], [class*='cascader'], [class*='popper'], [class*='popover']")]
-        .find((el) => el && visible(el) && (el.querySelector('input[placeholder="搜索"], input[placeholder*="搜"]') || /全部省市|已选地区|选择地区/.test(clean(el.innerText || el.textContent)))));
+        .find((el) => el && visible(el) && (el.querySelector('input[placeholder="搜索"], input[placeholder*="搜"], [role=tree]') || /select-tree-dropdown|全部省市|已选地区|选择地区/.test(`${el.className} ${clean(el.innerText || el.textContent)}`))));
       const companyHint = (() => {
         for (let node = control?.parentElement, depth = 0; node && depth < 16; node = node.parentElement, depth++) {
           const company = [...node.querySelectorAll(controlSelector)].find((el) => el !== control && /单位名称|公司名称/.test(fieldTitle(el)));
@@ -1093,9 +1102,12 @@
         return "";
       })();
       const cityName = chooseOptions.locationHint || location?.[2] || companyHint || String(value).trim();
+      const cityPart = location?.[2] || String(value).match(/([^省自治区特别行政区]+?(?:市|区|县))$/)?.[1] || cityName;
+      const citySearchTerms = [...new Set([cityPart.replace(/(?:特别行政区|自治区|自治州|市|地区|盟|区|县)$/, ""), cityPart].map(clean).filter((term) => term.length >= 2))];
       trace.area = { protocol: CONTENT_PROTOCOL, source: String(value), hint: chooseOptions.locationHint || "", companyHint, city: cityName, popupFound: !!areaPopup };
       if (areaPopup) {
-        const search = areaPopup.querySelector('input[placeholder="搜索"], input[placeholder*="搜"]');
+        const search = areaPopup.querySelector('input[placeholder="搜索"], input[placeholder*="搜"]')
+          || [control, target, controlBox].flatMap((node) => node?.matches?.("input:not([type=hidden])") ? [node] : [...(node?.querySelectorAll?.("input:not([type=hidden])") || [])]).find((input) => visible(input) && !input.readOnly);
         trace.area.searchFound = !!search;
         const writeSearch = (text) => {
           if (!search) return;
@@ -1103,31 +1115,88 @@
           setter ? setter.call(search, text) : (search.value = text);
           search.dispatchEvent(new Event("input", { bubbles: true }));
         };
-        const findArea = (name) => [...areaPopup.querySelectorAll(".area-item-container, [role=option], li, button, label, [class*=item], [class*=option], div, span")]
-          .filter((el) => visible(el) && (normalize(el.textContent) === normalize(name) || normalize(el.textContent).endsWith(normalize(name)) || normalize(el.textContent) === `${normalize(name)}市`))
+        const findArea = (name) => {
+          const areaText = (node) => clean(node?.innerText || node?.textContent);
+          const isAtsxTree = !!areaPopup.querySelector(".atsx-tree, .atsx-select-tree");
+          const matchesArea = (text) => normalize(text) === normalize(name) || normalize(text) === `${normalize(name)}市` || normalize(name) === `${normalize(text)}市`;
+          if (!isAtsxTree) return [...areaPopup.querySelectorAll(".area-item-container, [role=option], li, button, label, [class*=item], [class*=option], div, span")]
+            .filter((el) => visible(el) && (normalize(el.textContent) === normalize(name) || normalize(el.textContent).endsWith(normalize(name)) || normalize(el.textContent) === `${normalize(name)}市`))
+            .sort((a, b) => (a.children.length - b.children.length) || (a.getBoundingClientRect().width * a.getBoundingClientRect().height - b.getBoundingClientRect().width * b.getBoundingClientRect().height))[0];
+          // ATSX repeats hidden title text; generic pickers may include a parent region.
+          const treeCity = [...areaPopup.querySelectorAll("[role=treeitem]")].filter(visible).find((item) => matchesArea(areaText(item.querySelector("[data-cy-value], [class*='tree-title'], [class*='Tree-title']") || item)));
+          if (treeCity) return treeCity;
+          return [...new Set([...areaPopup.querySelectorAll(".area-item-container, [role=option], li, button, label, [class*=item], [class*=option], div, span")]
+          .filter((el) => visible(el) && matchesArea(areaText(el)))
+          .map((el) => el.closest(".area-item-container, [role=treeitem], [role=option], li") || el)
+          .filter((el) => {
+            const text = areaText(el.querySelector?.("[data-cy-value], [class*='tree-title'], [class*='Tree-title']") || el);
+            return matchesArea(text);
+          }))]
           .sort((a, b) => (a.children.length - b.children.length) || (a.getBoundingClientRect().width * a.getBoundingClientRect().height - b.getBoundingClientRect().width * b.getBoundingClientRect().height))[0];
+        };
+        const areaRows = () => [...areaPopup.querySelectorAll(".area-item-container, [role=treeitem], [role=option], li")].filter(visible);
+        const waitForAreaResult = async (name) => {
+          let signature = areaRows().map((row) => clean(row.innerText || row.textContent)).join("\u0001"); let changed = false; let settled = 0;
+          const end = Date.now() + 3000;
+          while (Date.now() < end) {
+            const city = findArea(name); if (city) return { city, count: areaRows().length, settled: true };
+            const rows = areaRows(); const next = rows.map((row) => clean(row.innerText || row.textContent)).join("\u0001");
+            if (next !== signature) { signature = next; changed = true; settled = 0; }
+            else if (changed && ++settled >= 3) return { city: null, count: rows.length, settled: true };
+            await wait(80);
+          }
+          return { city: findArea(name), count: areaRows().length, settled: false };
+        };
         if (search && cityName) {
-          writeSearch(cityName); await wait(100);
-          const city = await waitFor(() => findArea(cityName), 3000);
+          let city; let searchTerm = cityName;
+          trace.area.queryResults = [];
+          for (const term of citySearchTerms) {
+            writeSearch(term); await wait(100);
+            searchTerm = term;
+            const result = await waitForAreaResult(term);
+            trace.area.queryResults.push({ term, count: result.count, settled: result.settled });
+            city = result.city;
+            if (city) { searchTerm = term; break; }
+            if (result.settled && result.count) break;
+          }
+          trace.area.search = searchTerm;
           trace.optionFound = !!city;
-          trace.area.candidates = [...areaPopup.querySelectorAll(".area-item-container")].filter(visible).map((el) => clean(el.innerText || el.textContent)).slice(0, 8);
+          trace.area.candidates = areaRows().map((el) => clean(el.innerText || el.textContent)).slice(0, 8);
           if (city) {
             trace.option = clean(city.innerText || city.textContent);
-            const cityTarget = selectionTarget(city);
-            trace.commitTarget = { tag: cityTarget?.tagName || "", className: String(cityTarget?.className || ""), text: clean(cityTarget?.textContent) };
+            const isAtsxTree = !!areaPopup.querySelector(".atsx-tree, .atsx-select-tree");
+            const cityTargets = isAtsxTree
+              ? [
+                city.querySelector?.(".atsx-select-tree-checkbox"),
+                city.querySelector?.(".atsx-select-tree-node-content-wrapper, .atsx-tree-node-content-wrapper"),
+                city
+              ].filter((node, index, list) => node && list.indexOf(node) === index)
+              : [selectionTarget(city)];
+            trace.commitTarget = { tag: cityTargets[0]?.tagName || "", className: String(cityTargets[0]?.className || ""), text: clean(cityTargets[0]?.textContent) };
             const selectedBefore = clean(areaPopup.innerText || areaPopup.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
+            const checkedBefore = !!city.querySelector?.("input:checked, [aria-checked=true], [class*='checkbox-checked'], [class*='Checkbox-checked']");
+            const displaySelected = () => isAtsxTree && !visible(areaPopup) && valueMatches(clean(controlBox?.innerText || control?.innerText), cityName, label);
             const selectionChanged = () => {
               const selected = clean(areaPopup.innerText || areaPopup.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
-              return selected && selected !== selectedBefore;
+              const currentCity = findArea(searchTerm);
+              return displaySelected() || selected && selected !== selectedBefore || !checkedBefore && !!currentCity?.querySelector?.("input:checked, [aria-checked=true], [class*='checkbox-checked'], [class*='Checkbox-checked']");
             };
-            await clickOption(cityTarget, true, selectionChanged);
-            trace.selectionObserved = !!await waitFor(selectionChanged, 800);
+            trace.selectionAttempts = [];
+            for (const cityTarget of cityTargets) {
+              const attempt = { target: String(cityTarget.className || cityTarget.tagName), connected: cityTarget.isConnected };
+              trace.selectionAttempts.push(attempt);
+              try {
+                await clickOption(cityTarget, true, null, attempt);
+                trace.selectionObserved = !!await waitFor(selectionChanged, 1500);
+              } catch (error) { attempt.error = String(error?.message || error); }
+              if (trace.selectionObserved) break;
+            }
             trace.afterClick = readControl();
             const confirm = confirmationFor(areaPopup, control);
             trace.confirmFound = !!confirm;
             if (confirm) { await clickOption(confirm, true); await wait(120); }
             trace.afterConfirm = readControl();
-            trace.confirmed = !!await waitFor(() => valueMatches(readControl(), cityName, label), 800);
+            trace.confirmed = trace.selectionObserved || !!await waitFor(() => (displaySelected() || valueMatches(readControl(), cityName, label)) && !(search === target && normalize(readControl()) === normalize(searchTerm)), 800);
             if (!trace.confirmed) trace.failure = "area-display-not-confirmed";
             await closeVisibleDropdowns(control);
             return trace.confirmed;
@@ -1139,15 +1208,62 @@
         return false;
       }
       if (location) {
-        const province = options().find((el) => normalize(el.textContent) === normalize(location[1]));
+        // Midas first shows countries. Parent row clicks select a value;
+        // expanding requires its dedicated switcher before selecting a city.
+        const locationTree = () => [...document.querySelectorAll("[role=tree]")].filter(visible).sort((left, right) => {
+          const distance = (el) => { const rect = el.getBoundingClientRect(); return Math.abs(rect.left - controlRect.left) + Math.abs(rect.top - controlRect.bottom); };
+          return distance(left) - distance(right);
+        })[0];
+        const locationOptions = () => [...new Set([...options(), ...(popup?.querySelectorAll("[role=treeitem]") || []), ...(locationTree()?.querySelectorAll("[role=treeitem]") || [])])].filter(visible);
+        const locationText = (el) => clean(el?.querySelector?.("[data-cy-value], [class*='tree-title'], [class*='Tree-title']")?.textContent || el?.textContent);
+        const treeItem = (name) => locationOptions().find((el) => sameArea(locationText(el), name));
+        const findTreeItem = async (name) => {
+          let item = treeItem(name);
+          if (item) return item;
+          const tree = locationTree();
+          const scroller = [tree, ...(tree?.querySelectorAll("*") || [])].filter((el) => el?.clientHeight > 60 && el.scrollHeight > el.clientHeight + 2)
+            .sort((left, right) => right.clientHeight - left.clientHeight)[0];
+          if (!scroller) return null;
+          const originalTop = scroller.scrollTop;
+          // ponytail: bounded virtual-tree scan; a searchable tree is faster when available.
+          for (let pass = 0; pass < 20 && !item; pass++) {
+            const nextTop = Math.min(scroller.scrollHeight - scroller.clientHeight, scroller.scrollTop + Math.max(80, scroller.clientHeight * 0.8));
+            if (nextTop <= scroller.scrollTop) break;
+            scroller.scrollTop = nextTop;
+            scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+            await wait(70);
+            item = treeItem(name);
+          }
+          if (!item) { scroller.scrollTop = originalTop; scroller.dispatchEvent(new Event("scroll", { bubbles: true })); }
+          return item;
+        };
+        const expandTreeItem = async (item) => {
+          const switcher = item?.querySelector?.(".atsx-tree-switcher, [data-cy=switcher]");
+          const opened = () => !switcher || /(?:^|[_-])open\b/.test(String(switcher.className || ""));
+          if (opened()) return true;
+          // ponytail: only trust the debugger click after the tree actually expands.
+          await clickOption(switcher || item, true, opened);
+          return !!await waitFor(opened, 1200);
+        };
+        const mainland = treeItem("中国大陆");
+        if (mainland) await expandTreeItem(mainland);
+        const province = await findTreeItem(location[1]);
         if (province) {
-          await clickOption(province, true); await wait(80);
-          const city = options().find((el) => normalize(el.textContent) === normalize(location[2]));
-          if (city) await clickOption(selectionTarget(city), true);
+          let city = await findTreeItem(location[2]);
+          if (!city) { await expandTreeItem(province); city = await findTreeItem(location[2]); }
+          if (city) {
+            trace.option = trace.selectedValue = locationText(city);
+            await clickOption(city.querySelector(".atsx-tree-node-content-wrapper") || selectionTarget(city), true,
+              () => valueMatches(readControl(), location[2], label));
+          }
           const confirm = confirmationFor(popup, control);
           if (confirm) { await clickOption(confirm, true); await wait(120); }
+          trace.afterConfirm = readControl();
+          trace.confirmed = !!city && !!await waitFor(() => valueMatches(readControl(), location[2], label), 1000);
+          if (!trace.confirmed) trace.failure = city ? "tree-display-not-confirmed" : "tree-city-not-found";
+          logChoice("tree-confirmed", trace, choiceState(control, popup, city));
           await closeVisibleDropdowns(control);
-          return !!city;
+          return trace.confirmed;
         }
       }
     }
@@ -1199,7 +1315,10 @@
     logChoice("before-click", trace, trace.beforeClickState);
     const observeClick = (event) => { if (event.target === commitTarget || commitTarget?.contains?.(event.target)) trace.clickObserved = true; };
     document.addEventListener("click", observeClick, true);
-    const selectedCount = () => clean(popup?.innerText || popup?.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
+    const selectedCount = () => [...new Set([popup, ...popupFor(control)])]
+      .filter((candidate) => candidate?.isConnected && visible(candidate))
+      .map((candidate) => clean(candidate.innerText || candidate.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "")
+      .sort((left, right) => Number(right.match(/\d+/)?.[0] || 0) - Number(left.match(/\d+/)?.[0] || 0))[0] || "";
     const selectedBeforeClick = selectedCount();
     const multiSelector = !!selectedBeforeClick;
     const selectionChanged = () => {
@@ -1229,7 +1348,7 @@
     const confirm = multiSelector
       ? await waitFor(() => confirmationFor(popup, control), 800)
       : confirmationFor(popup, control);
-    if (chooseOptions.deferConfirm && confirm && !readControl()) {
+    if (chooseOptions.deferConfirm && confirm && !readControl() && !(multiSelector && trace.selectionObserved)) {
       trace.confirmFound = true;
       trace.cascadePending = true;
       trace.afterConfirm = readControl();

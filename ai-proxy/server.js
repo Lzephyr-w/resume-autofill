@@ -88,6 +88,9 @@ function assignmentResults(result, fields) {
     const confidence = Number(item.confidence);
     if (!Number.isFinite(confidence)) return { ...detail, reason: "low-confidence", confidence };
     let value = detail.requestedValue;
+    const locationCandidate = (field.locationCandidates || []).find((candidate) => normalize(candidate?.value) && normalize(candidate.value) === normalize(value));
+    if (field.locationCandidates?.length && !locationCandidate) return { ...detail, reason: "not-a-location-candidate", confidence };
+    if (locationCandidate) value = String(locationCandidate.value);
     if (isChoiceField(field) && !isDateField(field) && (!Array.isArray(field.options) || !field.options.length)) {
       return { ...detail, reason: field.optionSource === "popup-not-found" ? "candidate-not-read" : "options-unavailable", confidence };
     }
@@ -95,8 +98,8 @@ function assignmentResults(result, fields) {
       const usableOptions = field.options.filter((option) => !/^请选择$|^暂无选项$/.test(String(option || "").trim()));
       const selected = optionMatch(value, usableOptions, field);
       // Date pickers often mount an empty month list until the year is selected; let the content script resolve it live.
-      if (!selected && (usableOptions.length || !isDateField(field))) return { ...detail, reason: "not-a-page-option", confidence };
-      if (selected) value = selected;
+      if (!selected && !locationCandidate && (usableOptions.length || !isDateField(field))) return { ...detail, reason: "not-a-page-option", confidence };
+      if (selected && !locationCandidate) value = selected;
     }
     // A page option that survived exact/unique candidate validation is safer
     // than a model's subjective confidence score.
@@ -136,7 +139,7 @@ async function match(resume, fields, profile) {
     "只从简历中提取真实存在的信息；没有明确依据或置信度不足就不要填。每条结果必须原样返回字段 key 和 index，禁止创造字段。AI 只处理 deterministic fill 后仍为空的字段，不得覆盖已有值。",
     "日期、学历、公司、职位、联系方式应保持原文含义；select/combobox/radio/checkbox 的 options 是当前页面实时读取的候选项，若候选为空或 optionSource 为 popup-not-found 就留空；只要候选非空，必须从中选择一个完整、原样的 option 作为 value，禁止返回简历原文、区间内数值或近义词。日期若有前导零差异（如 09/9、01/1），按数值等价理解，最终由客户端点击当前页面实际选项。",
     "严格按字段标签和上下文匹配：日期/成绩不能写入描述、职责、评价或亮点；工作内容/工作描述/工作职责字段必须合并该条目的 description 与 highlights，若页面有独立工作亮点字段则同时单独填 highlights；证书的证书名称、获得时间、证书描述必须分别对应。profile.skills 中每项技能是独立记录：技能名称、掌握程度、使用时间总计、技能描述按 module 和 repeatIndex 同序对应，绝不把多个技能拼到一个字段；若简历明确给出熟悉、熟练、精通等程度且 options 非空，按候选的等级语义选择唯一、最贴近的完整 option（例如候选为“了解、一般、熟练、精通”时“熟悉”返回“熟练”）；没有明确依据的熟练程度、时长或描述留空。重复的教育、工作、项目、证书、技能区块按 module 和 repeatIndex 的页面顺序逐条对应，禁止跨条目串值。",
-    "语义等价字段应匹配（培养方式/学习方式/就读方式、工作职责/工作描述、获奖情况/奖励活动）；籍贯、现居住地和户口所在地是三个不同字段，禁止混填。已有 currentValue 的字段不要返回覆盖结果；无法确认的字段保持空。",
+    "语义等价字段应匹配（培养方式/学习方式/就读方式、工作职责/工作描述、获奖情况/奖励活动）；籍贯、现居住地和户口所在地是三个不同字段，禁止混填。若字段含 locationCandidates，只能从其中选择语义对应的一项并原样返回其 value；这是级联地址路径，允许不在当前一级 options 中，客户端会逐级选择。已有 currentValue 的字段不要返回覆盖结果；无法确认的字段保持空。",
     "优先使用结构化候选资料进行映射；每个字段 profileContext.sourceValue 是该字段对应的本地值。若 sourceValue 与 options 有唯一的语义对应，必须返回该字段及完整原样 option；不能因为 sourceValue 的措辞不同而省略。只有候选确实歧义或不存在时才不返回。", "原始简历只用于补充结构化资料中明确存在但未归类的信息。表单可能包含简历新增字段；customFields 中的键值也要按字段标签语义匹配，不要因为不在预设字段列表而忽略。只输出一个 JSON 对象，格式为 {\"assignments\":[{\"key\":\"\",\"index\":0,\"label\":\"\",\"value\":\"\",\"confidence\":0.9}]}，不要 Markdown 或解释文字。\n结构化候选资料：\n", JSON.stringify(profile || {}), "\n原始简历：\n", resume, "\n表单字段 JSON：\n", JSON.stringify(fields)
   ].join("");
   let lastError = "";

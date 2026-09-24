@@ -27,4 +27,7 @@ const speakingField = { key: "speaking", index: 0, label: "听说", options: ["�
 assert.equal(sanitizeAssignments({ assignments: [{ key: "speaking", index: 0, label: "听说", value: "熟悉", confidence: 0.9 }] }, [speakingField])[0].value, "熟练");
 assert.equal(assignmentResults({ assignments: [{ key: "speaking", index: 0, label: "听说", value: "母语", confidence: 0.9 }] }, [speakingField])[0].reason, "not-a-page-option");
 assert.deepEqual(sanitizeAssignments({ assignments: [{ key: "speaking", index: 0, label: "听说", value: "掌握", confidence: 0.9 }] }, [{ ...speakingField, options: ["熟练", "熟悉"] }]), []);
+const locationField = { key: "location", index: 0, type: "combobox", label: "所在地点", options: ["中国大陆", "广东"], locationCandidates: [{ key: "currentResidence", label: "现居住地", value: "广东省广州市" }] };
+assert.equal(sanitizeAssignments({ assignments: [{ key: "location", index: 0, label: "所在地点", value: "广东省广州市", confidence: 0.9 }] }, [locationField])[0].value, "广东省广州市");
+assert.equal(assignmentResults({ assignments: [{ key: "location", index: 0, label: "所在地点", value: "广东", confidence: 0.9 }] }, [locationField])[0].reason, "not-a-location-candidate");
 console.log("PASS ai-proxy compatibility");
