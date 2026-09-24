@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_PROTOCOL = 57;
+  const CONTENT_PROTOCOL = 58;
   if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -921,7 +921,7 @@
     if (target?.tagName === "SELECT") {
       trace.path = "native-select";
       const educationType = /学历类型|受教育类型|培养方式/.test(label) && [...target.options].find((option) =>
-        /非全日制/.test(value) ? /非全日制/.test(option.text) : /全日制/.test(value) ? /全日制/.test(option.text) && !/非全日制/.test(option.text) : false)?.value;
+        /非全日制/.test(value) ? /非全日制/.test(option.text) : /全日制|统招/.test(value) ? /全日制/.test(option.text) && !/非全日制/.test(option.text) : false)?.value;
       trace.confirmed = setValue(target, educationType || value);
       if (!trace.confirmed) trace.failure = "native-select-no-match";
       return trace.confirmed;
@@ -976,7 +976,7 @@
       const forms = [...wantedForms, ...optionForms];
       if (/薪|工资|待遇/.test(label)) return forms.some((form) => salaryToken(normalized) === salaryToken(form));
       const educationTypeMatch = /学历类型|受教育类型|培养方式/.test(label)
-        && (/非全日制/.test(value) ? /非全日制/.test(normalized) : /全日制/.test(value) ? /全日制/.test(normalized) && !/非全日制/.test(normalized) : false);
+        && (/非全日制/.test(value) ? /非全日制/.test(normalized) : /全日制|统招/.test(value) ? /全日制/.test(normalized) && !/非全日制/.test(normalized) : false);
       return numericMonthMatch || educationTypeMatch || forms.some((form) => normalized === form || normalized.includes(form) || form.includes(normalized));
     };
     if (year && month && /(日期|时间)/.test(label)) {

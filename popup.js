@@ -79,6 +79,7 @@ function cleanProfile(input) {
       Object.entries(item || {}).map(([k, v]) => [k, String(v ?? "").trim()])
     )).filter((item) => Object.values(item).some((value) => String(value || "").trim())) : [];
   });
+  base.education = base.education.map((row) => ({ ...row, training: row.training || row.educationType || row.education_type || row.受教育类型 || row.学历类型 || row.培养方式 || "" }));
   const dateKey = (value) => {
     const match = String(value || "").match(/(\d{4})\s*(?:年|[./-])\s*(\d{1,2})(?:\s*(?:月|[./-])\s*(\d{1,2}))?/);
     return match ? Number(match[1]) * 10000 + Number(match[2]) * 100 + Number(match[3] || 1) : 0;
@@ -357,7 +358,7 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
-const CONTENT_MESSAGE_SUFFIX = "_V57";
+const CONTENT_MESSAGE_SUFFIX = "_V58";
 const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
 const injectCurrentContent = (tabId) => {
   if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");
@@ -403,12 +404,13 @@ function aiFieldContext(field, profile) {
     : /户籍|户口/.test(label) ? profile?.householdRegistration
       : /居住|所在(?:地|地点|地区)?/.test(label) ? profile?.currentResidence : "";
   const rows = /实习/.test(module) ? (profile?.internships?.length ? profile.internships : all) : /工作/.test(module) ? (profile?.work?.length ? profile.work : all) : /工作地点|月薪|职位名称|所在部门|工作性质/.test(label) ? all : [];
+  const educationType = /学历类型|受教育类型|培养方式|学习方式|就读方式/.test(label) ? profile?.education?.[index]?.training : "";
   const intentField = /求职意向|期望|现月薪|工作城市|行业|职业|到岗/.test(`${module} ${label}`);
   const sourceValue = /期望从事行业|期望行业|意向行业/.test(label) ? profile?.jobIntent?.industry
     : /期望从事职业|期望职业|意向职位/.test(label) ? profile?.jobIntent?.occupation
       : /期望月薪|期望薪资|期望待遇/.test(label) ? profile?.jobIntent?.expectedSalary
         : /期望工作城市|期望城市|意向城市|期望工作地点|期望地点/.test(label) ? profile?.jobIntent?.city
-          : /工作地点|办公地点|工作地区|办公城市|任职地点/.test(label) ? rows[index]?.location : personalSource;
+          : /工作地点|办公地点|工作地区|办公城市|任职地点/.test(label) ? rows[index]?.location : educationType || personalSource;
   const locationCandidates = personalLocation ? [
     ["nativePlace", "籍贯", profile?.nativePlace], ["currentResidence", "现居住地", profile?.currentResidence], ["householdRegistration", "户口所在地", profile?.householdRegistration]
   ].filter(([, , value]) => String(value || "").trim()).map(([key, label, value]) => ({ key, label, value: String(value).trim() })) : [];

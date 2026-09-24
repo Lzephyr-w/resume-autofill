@@ -188,7 +188,7 @@
     document.querySelector("#form").addEventListener("change", (event) => changed.add(`change:${event.target.id || event.target.name}`));
     globalThis.__RESUME_AUTOFILL_TEST__ = true;
   </script>
-  <script src="../content.js?v=atsx-v9-descriptions"></script>
+  <script src="../content.js?v=atsx-v10-education-type"></script>
   <script>
     (async () => {
       if (ui === "phoenix-anchor") {
@@ -203,7 +203,7 @@
       if (atsx) {
         const profile = {
           customFields: { 证件类型: "护照", 证件号码: "110101199001011234" },
-          education: [{ school: "测试大学", start: "2024-01", end: "2024-06", training: "全日制" }],
+          education: [{ school: "测试大学", start: "2024-01", end: "2024-06", training: "统招" }],
           internships: [{ company: "实习一", start: "2024-01", end: "2024-06", description: "实习一描述" }, { company: "实习二", start: "2024-07", end: "2024-12", description: "实习二描述" }],
           projects: [{ name: "项目一", start: "2024-01", end: "2024-06", description: "项目一描述" }, { name: "项目二", start: "2024-07", end: "2024-12", description: "项目二描述" }]
         };
