@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_PROTOCOL = 58;
+  const CONTENT_PROTOCOL = 59;
   if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -175,7 +175,7 @@
     "项目经历": ["项目经验", "项目经历"],
     "技能": ["技能", "专业技能", "技能特长"],
     "证书": ["证书", "资格证书", "证书信息"],
-    "获奖经历": ["获奖情况", "获奖经历", "竞赛获奖"],
+    "获奖经历": ["获奖", "获奖情况", "获奖经历", "竞赛/获奖经历", "竞赛获奖"],
     "语言能力": ["语言技能", "语言能力", "外语能力", "语言证书"],
     "学生干部经历": ["学生干部经历", "干部经历", "校园经历", "社团经历"]
   };
@@ -249,7 +249,7 @@
       const dates = (dateTarget ? dateControls(dateTarget) : []).filter((el) => row.contains(el));
       if (dates.length >= 2 && (!/结束时间|毕业时间|教育结束|工作结束|项目结束/.test(label) || dates.length >= 4)) return /结束时间|毕业时间|教育结束|工作结束|项目结束/.test(label) ? dates[2] : dates[0];
     }
-    if (row && /^(?:工作描述|工作职责|项目描述)$/.test(label)) {
+    if (row && /^(?:工作描述|工作职责|项目描述|获奖描述)$/.test(label)) {
       const description = [...row.querySelectorAll("textarea, [contenteditable='true']")].filter(editable)
         .find((el) => /描述|职责|内容|亮点|摘要/.test(fieldTitle(el) || labelText(el)));
       if (description) return description;
@@ -380,7 +380,7 @@
     "听说": ["听说", "听力口语", "听力", "口语"],
     "读写": ["读写", "阅读写作", "阅读", "写作"],
     "获奖时间": ["获奖日期", "获得时间", "奖项时间", "获奖时间"],
-    "奖项名称": ["获奖项", "奖励名称", "奖项", "奖项名称"],
+    "奖项名称": ["获奖项", "获奖名称", "奖励名称", "奖项", "奖项名称"],
     "获奖级别": ["奖项级别", "奖励级别", "获奖等级", "获奖级别"],
     "籍贯": ["籍贯", "家乡"],
     "户口所在地": ["户籍所在地", "户籍地", "户口所在地", "户籍地址"],
@@ -405,7 +405,7 @@
     "项目名称": ["项目名称", "项目标题"],
     "项目链接": ["项目链接", "项目地址", "项目网址", "在线链接", "演示地址", "GitHub链接", "Github链接"],
     "项目职责": ["职责", "项目中职责", "项目职务", "职务", "个人工作", "项目角色", "角色"],
-    "获奖项": ["奖励活动", "奖项名称", "奖项"],
+    "获奖项": ["获奖名称", "奖励活动", "奖项名称", "奖项"],
     "获奖描述": ["奖励描述", "荣誉描述"],
     "证书名称": ["证书", "资格证书"],
     "获得时间": ["获奖时间", "取得时间", "日期"],
@@ -946,6 +946,33 @@
       trace.confirmed = !!monthItem && !!await waitFor(() => dateValueMatches(target, value), 1000);
       trace.datePicker.after = controlValue(target);
       if (!trace.confirmed) trace.failure = monthItem ? "display-not-confirmed" : "atsx-period-option-not-found";
+      await closeVisibleDropdowns(target);
+      return trace.confirmed;
+    }
+    const atsxYearPicker = target?.matches?.('input[placeholder="YYYY"]') && target.closest(".atsx-date-picker");
+    if (year && atsxYearPicker) {
+      trace.path = "atsx-year-picker";
+      target.click();
+      const cy = target.getAttribute("data-cy");
+      const panelFor = () => cy && document.querySelector(`[data-cy="${CSS.escape(`${cy}Dropdown`)}"]`);
+      let panel = await waitFor(panelFor, 1000);
+      const optionFor = () => panel?.querySelector(`[data-cy="${CSS.escape(year)}"]`);
+      for (let attempts = 0; !optionFor() && attempts < 20; attempts++) {
+        const range = clean(panel?.querySelector('[data-cy="year"]')?.textContent).match(/(\d{4})\D+(\d{4})/);
+        const direction = range && Number(year) < Number(range[1]) ? "prev" : "next";
+        const button = panel?.querySelector(`[data-cy="${direction}"]`);
+        if (!button) break;
+        button.click();
+        await wait(40);
+        panel = panelFor() || panel;
+      }
+      const yearOption = optionFor();
+      trace.datePicker = { protocol: CONTENT_PROTOCOL, panelFound: !!panel, target: cy || "", year, yearFound: !!yearOption };
+      if (yearOption) yearOption.click();
+      trace.selectedValue = year;
+      trace.confirmed = !!yearOption && !!await waitFor(() => normalize(controlValue(target)) === normalize(year), 1000);
+      trace.datePicker.after = controlValue(target);
+      if (!trace.confirmed) trace.failure = yearOption ? "display-not-confirmed" : "atsx-year-option-not-found";
       await closeVisibleDropdowns(target);
       return trace.confirmed;
     }
