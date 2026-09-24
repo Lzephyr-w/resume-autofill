@@ -8,7 +8,7 @@ const manifest = JSON.parse(fs.readFileSync(require.resolve("../manifest.json"),
 const profileHelpers = source.slice(0, source.indexOf("function findValue"));
 const { cleanProfile } = Function(`${profileHelpers}; return { cleanProfile };`)();
 const helpers = source.slice(source.indexOf("function fieldLabel"), source.indexOf("const missingLocalValue"));
-const { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions, isCascadeField, cascadeCandidateAssignments, searchableCascadeAssignments, searchableSelectorAssignments } = Function(`${helpers}; return { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions, isCascadeField, cascadeCandidateAssignments, searchableCascadeAssignments, searchableSelectorAssignments };`)();
+const { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions, isCascadeField, cascadeCandidateAssignments, searchableCascadeAssignments, searchableSelectorAssignments, locationSearchHint } = Function(`${helpers}; return { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions, isCascadeField, cascadeCandidateAssignments, searchableCascadeAssignments, searchableSelectorAssignments, locationSearchHint };`)();
 
 const result = missingFieldLabels(["民族", "期望工作城市"], [{ label: "期望工作城市" }]);
 assert.deepEqual(result, { unresolved: ["期望工作城市"], unavailable: ["民族"] });
@@ -30,6 +30,8 @@ assert.equal(localCandidate({ label: "期望从事职业", options: ["Java开发
 assert.equal(localCandidate({ label: "期望月薪(税前)", options: ["2001～4000", "8001～10000"] }, candidateProfile), "2001～4000");
 assert.equal(localCandidate({ label: "工作地点", module: "工作经历", repeatIndex: 1, options: ["广州", "深圳"] }, candidateProfile), "深圳");
 assert.equal(aiFieldContext({ label: "工作地点", module: "", repeatIndex: 0, occurrence: 1 }, candidateProfile).experience.location, "深圳市");
+assert.equal(locationSearchHint({ label: "工作地点", module: "工作经历", repeatIndex: 0 }, { work: [{ location: "广东省", company: "广州市示例公司" }] }), "广州市");
+assert.equal(locationSearchHint({ label: "工作地点", module: "工作经历", repeatIndex: 0 }, { work: [{ location: "广东省", company: "广州示例公司" }] }), "广州");
 assert.equal(localCandidate({ label: "期望从事职业", options: ["前端开发工程师", "前端开发实习生"] }, candidateProfile), "");
 assert.deepEqual(localCandidateAssignments([{ key: "city", index: 2, label: "期望工作城市", options: ["广州", "深圳"] }], candidateProfile), [{ key: "city", index: 2, label: "期望工作城市", value: "广州", confidence: 1 }]);
 assert.deepEqual(localCandidateAssignments([{ key: "city", index: 2, label: "期望工作城市", options: ["广东省", "浙江省"] }], candidateProfile), []);
@@ -44,10 +46,11 @@ assert.equal(isCascadeField({ label: "期望从事行业", optionSource: "native
 assert.deepEqual(cascadeCandidateAssignments([
   { key: "work-1", index: 1, label: "工作地点", module: "工作经历", repeatIndex: 0, optionSource: "popup", options: ["广东省", "浙江省"] },
   { key: "work-2", index: 2, label: "工作地点", module: "工作经历", repeatIndex: 1, optionSource: "popup", options: ["广东省", "浙江省"] }
-], { work: [{ location: "广东省广州市" }, { location: "浙江省杭州市" }] }).map(({ key, value }) => ({ key, value })), [{ key: "work-1", value: "广东省" }, { key: "work-2", value: "浙江省" }]);
+], { work: [{ location: "广东省广州市" }, { location: "浙江省杭州市" }] }).map(({ key, value, directLocationSearch }) => ({ key, value, directLocationSearch })), [{ key: "work-1", value: "广东省广州市", directLocationSearch: true }, { key: "work-2", value: "浙江省杭州市", directLocationSearch: true }]);
 assert.deepEqual(cascadeCandidateAssignments([{ key: "ambiguous", index: 0, label: "期望从事职业", optionSource: "popup", options: ["前端开发工程师", "前端开发实习生"] }], candidateProfile), []);
 assert.deepEqual(searchableCascadeAssignments([{ key: "industry", index: 0, label: "期望从事行业", hasSearch: true }], candidateProfile).map(({ key, value }) => ({ key, value })), [{ key: "industry", value: "互联网" }]);
-assert.deepEqual(searchableCascadeAssignments([{ key: "city", index: 0, label: "期望工作城市", hasSearch: true }], candidateProfile), []);
+assert.deepEqual(searchableCascadeAssignments([{ key: "city", index: 0, label: "期望工作城市", hasSearch: true, isMultiSelector: true }], candidateProfile), []);
+assert.deepEqual(searchableCascadeAssignments([{ key: "work-city", index: 0, label: "工作地点", module: "工作经历", repeatIndex: 0, hasSearch: true }], candidateProfile).map(({ key, value, directLocationSearch }) => ({ key, value, directLocationSearch })), [{ key: "work-city", value: "广州市", directLocationSearch: true }]);
 assert.deepEqual(searchableSelectorAssignments([{ key: "industry", index: 0, label: "期望从事行业", hasSearch: true, isMultiSelector: true, options: ["制造业", "互联网/电子商务"] }], candidateProfile).map(({ key, value }) => ({ key, value })), [{ key: "industry", value: "互联网/电子商务" }]);
 assert.deepEqual([...retryFieldKeys([{ key: "city", optionSource: "popup", options: [] }], 1)], ["city"]);
 assert.deepEqual([...retryFieldKeys([undefined, { key: "city", optionSource: "popup", options: [] }], 1)], ["city"]);
@@ -69,19 +72,31 @@ assert.match(source, /keepOpen: true/);
 assert.match(source, /for \(const initial of cascadeAssignments\)/);
 assert.match(source, /level <= 6/);
 assert.match(source, /keys: \[assignment\.key\], keepOpen: true/);
-assert.match(source, /sourceValue: fieldFor\(assignment\)\?\.profileContext\?\.sourceValue/);
+assert.match(source, /const sourceValue = field\?\.profileContext\?\.sourceValue/);
 assert.match(source, /\["ai-no-assignment", "not-a-page-option", "candidate-not-read", "options-unavailable"\]/);
 assert.match(source, /chrome\.scripting\.executeScript/);
-assert.match(source, /CONTENT_MESSAGE_SUFFIX = "_V19"/);
+assert.match(source, /CONTENT_MESSAGE_SUFFIX = "_V27"/);
 assert.match(contentSource, /__resumeAutofillContentProtocol/);
-assert.match(contentSource, /CONTENT_PROTOCOL = 19/);
+assert.match(contentSource, /CONTENT_PROTOCOL = 27/);
 assert.match(contentSource, /await clickOption\(selectionTarget\(city\), true\)/);
+assert.match(contentSource, /writeSearch\(cityName\)/);
+assert.match(contentSource, /!isLocationPicker/);
+assert.match(contentSource, /area-city-not-found/);
+assert.match(contentSource, /trace\.area = \{ protocol: CONTENT_PROTOCOL/);
+assert.match(source, /地区协议 V\$\{area\.protocol/);
+assert.match(source, /locationSearchHint/);
+assert.match(contentSource, /chooseOptions\.locationHint/);
+assert.match(contentSource, /const companyHint/);
+assert.match(contentSource, /clickOption\(commitTarget, multiSelector, multiSelector \? selectionChanged : null\)/);
+assert.match(contentSource, /findArea\(cityName\), 3000/);
 assert.match(source, /searchableSelectorAssignments/);
 assert.match(contentSource, /isMultiSelector/);
 assert.match(contentSource, /list-item-container/);
 assert.match(contentSource, /area-item-container/);
 assert.match(source, /!field\.isMultiSelector/);
 assert.match(contentSource, /commitTarget/);
+assert.match(contentSource, /const commitTarget = selectionTarget\(option\)/);
+assert.doesNotMatch(contentSource, /chooseOptions\.deferConfirm \? option/);
 assert.match(contentSource, /RESUME_AUTOFILL_TRUSTED_CLICK/);
 assert.match(contentSource, /selectionObserved/);
 assert.match(contentSource, /confirmAttempted/);

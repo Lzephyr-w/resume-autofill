@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_PROTOCOL = 19;
+  const CONTENT_PROTOCOL = 27;
   if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -669,13 +669,13 @@
     const marker = text.search(/\s+(?=(?:负责|实现|构建|设计|开发|使用|参与|主导))/);
     return marker > 0 ? { summary: text.slice(0, marker).trim(), responsibilities: text.slice(marker).trim() } : { summary: text, responsibilities: "" };
   };
-  const clickOption = async (el, trusted = false) => {
+  const clickOption = async (el, trusted = false, changed) => {
     if (!el) return false;
     if (trusted && globalThis.chrome?.runtime?.sendMessage) {
       const rect = el.getBoundingClientRect();
       try {
         const result = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_TRUSTED_CLICK", x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
-        if (result?.clicked) return true;
+        if (result?.clicked && (!changed || await waitFor(changed, 150))) return true;
       } catch {}
     }
     const event = (type) => typeof PointerEvent === "function" && type.startsWith("pointer")
@@ -809,7 +809,7 @@
       // Guard the common AI failure: dates/scores must not land in free-text descriptions.
       if (isDescription(targetLabel) && looksLikeDate(assignment.value)) { diagnostics.push({ ...detail, reason: "description-date-protected" }); continue; }
       if (looksLikeDate(assignment.value) && !/(日期|时间|获得时间|毕业时间|开始时间|结束时间)/.test(normalize(targetLabel))) { diagnostics.push({ ...detail, reason: "date-field-mismatch" }); continue; }
-      if (await applyValue(targetLabel, assignment.value, el, { deferConfirm: !!assignment.deferConfirm, sourceValue: assignment.sourceValue })) { filled++; diagnostics.push({ ...detail, reason: "filled", actual: controlValue(el), choice: lastChoice }); }
+      if (await applyValue(targetLabel, assignment.value, el, { deferConfirm: !!assignment.deferConfirm, sourceValue: assignment.sourceValue, locationHint: assignment.locationHint })) { filled++; diagnostics.push({ ...detail, reason: "filled", actual: controlValue(el), choice: lastChoice }); }
       else if (assignment.deferConfirm && lastChoice?.cascadePending) diagnostics.push({ ...detail, reason: "cascade-parent-selected", actual: controlValue(el), choice: lastChoice });
       else diagnostics.push({ ...detail, reason: "page-option-or-validation-failed", actual: controlValue(el), choice: lastChoice });
     }
@@ -1069,22 +1069,34 @@
       }, 1400);
       if (found) popup = found;
     };
+    const isLocationPicker = /籍贯|居住地|户籍|户口|(?:工作|期望).*(?:地点|城市)/.test(label);
     const search = [popup?.querySelector("input:not([type=hidden])"), target].find((el) => el?.tagName === "INPUT" && !el.readOnly);
     // A salary search box filters by displayed range text; searching a raw
     // number such as 3500 hides “2001 ~ 4000”. Match ranges from real options.
     const proficiencySearch = /掌握程度|熟练程度|技能等级|语言水平|听说|读写/.test(label)
       ? ["", "了解", "一般", "熟练", "精通"][proficiencyLevel(value)] : "";
-    if (search && !/薪|工资|待遇/.test(label) && !options().some((el) => matches(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")))) {
+    if (search && !isLocationPicker && !/薪|工资|待遇/.test(label) && !options().some((el) => matches(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")))) {
       // Autocomplete controls need the desired text before their real options exist.
       setSearchValue(search, proficiencySearch || value);
       await refreshPopup();
     }
-    if (/籍贯|居住地|户籍|户口|(?:工作|期望).*(?:地点|城市)/.test(label)) {
+    if (isLocationPicker) {
       const location = String(value).trim().match(/^(.+?(?:省|自治区|特别行政区|市))[\/／,，\s-]*(.+?(?:市|区|县))$/);
-      const areaPopup = await waitFor(() => [...document.querySelectorAll("[role=dialog], [class*='area'], [class*='cascader'], [class*='popper'], [class*='popover']")]
-        .find((el) => visible(el) && (el.querySelector('input[placeholder="搜索"], input[placeholder*="搜"]') || /全部省市|已选地区|选择地区/.test(clean(el.innerText || el.textContent)))));
-      if (location && areaPopup) {
+      const areaPopup = await waitFor(() => [popup, ...openDropdowns(), ...document.querySelectorAll("[role=dialog], [class*='area'], [class*='cascader'], [class*='popper'], [class*='popover']")]
+        .find((el) => el && visible(el) && (el.querySelector('input[placeholder="搜索"], input[placeholder*="搜"]') || /全部省市|已选地区|选择地区/.test(clean(el.innerText || el.textContent)))));
+      const companyHint = (() => {
+        for (let node = control?.parentElement, depth = 0; node && depth < 16; node = node.parentElement, depth++) {
+          const company = [...node.querySelectorAll(controlSelector)].find((el) => el !== control && /单位名称|公司名称/.test(fieldTitle(el)));
+          const value = controlValue(company);
+          if (value) return value.match(/^([\u4e00-\u9fff]{2,6}市)/)?.[1] || value.match(/^([\u4e00-\u9fff]{2})/)?.[1] || "";
+        }
+        return "";
+      })();
+      const cityName = chooseOptions.locationHint || location?.[2] || companyHint || String(value).trim();
+      trace.area = { protocol: CONTENT_PROTOCOL, source: String(value), hint: chooseOptions.locationHint || "", companyHint, city: cityName, popupFound: !!areaPopup };
+      if (areaPopup) {
         const search = areaPopup.querySelector('input[placeholder="搜索"], input[placeholder*="搜"]');
+        trace.area.searchFound = !!search;
         const writeSearch = (text) => {
           if (!search) return;
           const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -1092,19 +1104,39 @@
           search.dispatchEvent(new Event("input", { bubbles: true }));
         };
         const findArea = (name) => [...areaPopup.querySelectorAll(".area-item-container, [role=option], li, button, label, [class*=item], [class*=option], div, span")]
-          .filter((el) => visible(el) && normalize(el.textContent) === normalize(name))
+          .filter((el) => visible(el) && (normalize(el.textContent) === normalize(name) || normalize(el.textContent).endsWith(normalize(name)) || normalize(el.textContent) === `${normalize(name)}市`))
           .sort((a, b) => (a.children.length - b.children.length) || (a.getBoundingClientRect().width * a.getBoundingClientRect().height - b.getBoundingClientRect().width * b.getBoundingClientRect().height))[0];
-        let province = findArea(location[1]);
-        if (!province) { writeSearch(location[1]); await wait(100); province = findArea(location[1]); }
-        if (province) {
-          await clickOption(province, true);
-          const city = await waitFor(() => findArea(location[2]));
-          if (city) await clickOption(selectionTarget(city), true);
-          const confirm = confirmationFor(areaPopup, control);
-          if (confirm) { await clickOption(confirm, true); await wait(120); }
-          await closeVisibleDropdowns(control);
-          return !!city;
+        if (search && cityName) {
+          writeSearch(cityName); await wait(100);
+          const city = await waitFor(() => findArea(cityName), 3000);
+          trace.optionFound = !!city;
+          trace.area.candidates = [...areaPopup.querySelectorAll(".area-item-container")].filter(visible).map((el) => clean(el.innerText || el.textContent)).slice(0, 8);
+          if (city) {
+            trace.option = clean(city.innerText || city.textContent);
+            const cityTarget = selectionTarget(city);
+            trace.commitTarget = { tag: cityTarget?.tagName || "", className: String(cityTarget?.className || ""), text: clean(cityTarget?.textContent) };
+            const selectedBefore = clean(areaPopup.innerText || areaPopup.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
+            const selectionChanged = () => {
+              const selected = clean(areaPopup.innerText || areaPopup.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
+              return selected && selected !== selectedBefore;
+            };
+            await clickOption(cityTarget, true, selectionChanged);
+            trace.selectionObserved = !!await waitFor(selectionChanged, 800);
+            trace.afterClick = readControl();
+            const confirm = confirmationFor(areaPopup, control);
+            trace.confirmFound = !!confirm;
+            if (confirm) { await clickOption(confirm, true); await wait(120); }
+            trace.afterConfirm = readControl();
+            trace.confirmed = !!await waitFor(() => valueMatches(readControl(), cityName, label), 800);
+            if (!trace.confirmed) trace.failure = "area-display-not-confirmed";
+            await closeVisibleDropdowns(control);
+            return trace.confirmed;
+          }
         }
+        // This picker can search a city directly.  Do not degrade to its
+        // province, which leaves the required city selection empty.
+        trace.failure = "area-city-not-found";
+        return false;
       }
       if (location) {
         const province = options().find((el) => normalize(el.textContent) === normalize(location[1]));
@@ -1161,7 +1193,7 @@
     trace.option = clean(option.textContent || option.getAttribute("data-value") || option.getAttribute("value"));
     trace.selectedValue = trace.option;
     trace.commit = "option-click";
-    const commitTarget = chooseOptions.deferConfirm ? option : selectionTarget(option);
+    const commitTarget = selectionTarget(option);
     trace.commitTarget = { tag: commitTarget?.tagName || "", className: String(commitTarget?.className || ""), text: clean(commitTarget?.textContent) };
     trace.beforeClickState = choiceState(control, popup, commitTarget);
     logChoice("before-click", trace, trace.beforeClickState);
@@ -1170,13 +1202,14 @@
     const selectedCount = () => clean(popup?.innerText || popup?.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
     const selectedBeforeClick = selectedCount();
     const multiSelector = !!selectedBeforeClick;
-    await clickOption(commitTarget, multiSelector);
+    const selectionChanged = () => {
+      const selected = selectedCount();
+      return selected && selected !== selectedBeforeClick;
+    };
+    await clickOption(commitTarget, multiSelector, multiSelector ? selectionChanged : null);
     document.removeEventListener("click", observeClick, true);
     if (multiSelector) {
-      trace.selectionObserved = !!await waitFor(() => {
-        const selected = selectedCount();
-        return selected && selected !== selectedBeforeClick;
-      }, 800);
+      trace.selectionObserved = !!await waitFor(selectionChanged, 800);
     } else await wait(80);
     trace.afterClick = readControl();
     trace.afterClickState = choiceState(control, popup, commitTarget);

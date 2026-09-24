@@ -357,7 +357,7 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
-const CONTENT_MESSAGE_SUFFIX = "_V19";
+const CONTENT_MESSAGE_SUFFIX = "_V27";
 const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
 const injectCurrentContent = (tabId) => {
   if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");
@@ -407,6 +407,12 @@ function aiFieldContext(field, profile) {
           : /工作地点|办公地点|工作地区|办公城市|任职地点/.test(label) ? rows[index]?.location : "";
   return { ...(intentField ? { jobIntent: profile?.jobIntent || {} } : {}), ...(rows.length && Number.isInteger(index) ? { experience: rows[index] || null } : {}), ...(sourceValue ? { sourceValue: String(sourceValue) } : {}) };
 }
+const locationSearchHint = (field, profile) => {
+  const context = aiFieldContext(field, profile); const source = String(context.sourceValue || "");
+  if (!/(?:省|自治区|特别行政区)$/.test(source)) return source;
+  const company = String(context.experience?.company || "");
+  return company.match(/^([\u4e00-\u9fff]{2,6}市)/)?.[1] || company.match(/^([\u4e00-\u9fff]{2})/)?.[1] || source;
+};
 const fieldsWithLiveOptions = (fields) => (fields || []).filter(Boolean).filter((field) => field.options?.length);
 const hasProfileContext = (field, profile) => Object.values(aiFieldContext(field, profile)).some((value) => value && (typeof value !== "object" || Object.values(value).some(Boolean)));
 const choiceToken = (value) => String(value || "").toLowerCase().replace(/[：:（）()\[\]【】／\/\s_-]/g, "");
@@ -459,17 +465,19 @@ const localCandidateAssignments = (fields, profile) => fields.flatMap((field) =>
   if (isCascadeField(field) && !committedCascadeCandidate(value, source)) return [];
   return value ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1 }] : [];
 });
+const isLocationField = (field) => /城市|地点|地区|所在地/.test(fieldLabel(field));
 const cascadeCandidateAssignments = (fields, profile) => fields.flatMap((field) => {
   const value = localCandidate(field, profile);
-  return value ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1, sourceValue: aiFieldContext(field, profile).sourceValue, local: true }] : [];
+  const sourceValue = aiFieldContext(field, profile).sourceValue;
+  const directLocationSearch = isLocationField(field);
+  return value ? [{ key: field.key, index: field.index, label: field.label, value: directLocationSearch ? sourceValue : value, confidence: 1, sourceValue, locationHint: directLocationSearch ? locationSearchHint(field, profile) : "", local: true, directLocationSearch }] : [];
 });
-// Searchable industry/job cascades can resolve a leaf directly even when its
-// broad parent is not lexically present in the first pane. Never do this for
-// locations: a full "province + city" search is ambiguous across portals.
+// Searchable cascades can resolve a leaf directly when the portal searches
+// locations by city name (for example, 优博讯's 工作地点 picker).
 const searchableCascadeAssignments = (fields, profile, occupied = new Set()) => fields.flatMap((field) => {
   const value = aiFieldContext(field, profile).sourceValue;
-  return field?.hasSearch && !occupied.has(field.key) && /行业|职业|职位|岗位/.test(fieldLabel(field)) && value
-    ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1, sourceValue: value, searchFallback: true }] : [];
+  return (field?.hasSearch || isLocationField(field)) && !field.isMultiSelector && !occupied.has(field.key) && /行业|职业|职位|岗位|城市|地点|地区|所在地/.test(fieldLabel(field)) && value
+    ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1, sourceValue: value, locationHint: isLocationField(field) ? locationSearchHint(field, profile) : "", searchFallback: true, directLocationSearch: isLocationField(field) }] : [];
 });
 const searchableSelectorAssignments = (fields, profile, occupied = new Set()) => fields.flatMap((field) => {
   const value = localCandidate(field, profile) || aiFieldContext(field, profile).sourceValue;
@@ -590,7 +598,11 @@ $("ai").addEventListener("click", async () => {
       }
       const fieldFor = (assignment) => liveFields.find((field) => field.key === assignment.key || field.index === assignment.index);
       const aiCascade = (result.assignments || []).filter((assignment) => isCascadeField(fieldFor(assignment)))
-        .map((assignment) => ({ ...assignment, sourceValue: fieldFor(assignment)?.profileContext?.sourceValue || "" }));
+        .map((assignment) => {
+          const field = fieldFor(assignment);
+          const sourceValue = field?.profileContext?.sourceValue || "";
+          return { ...assignment, value: isLocationField(field) ? sourceValue || assignment.value : assignment.value, sourceValue, locationHint: isLocationField(field) ? locationSearchHint(field, profile) : "", directLocationSearch: isLocationField(field) };
+        });
       const cascadeAssignments = [...localCascade, ...aiCascade, ...searchableCascadeAssignments(liveFields.filter(isCascadeField), profile, new Set([...localCascade, ...aiCascade].map((item) => item.key)))];
       const regularAssignments = (result.assignments || []).filter((assignment) => !isCascadeField(fieldFor(assignment)));
       let applied = { filled: 0, diagnostics: [] };
@@ -612,7 +624,7 @@ $("ai").addEventListener("click", async () => {
         let field = fieldFor(initial);
         const seenOptions = new Set((field?.options || []).map(choiceToken));
         for (let level = 1; assignment && level <= 6; level++) {
-          const step = await sendToFrame(tab.id, target.frameId, { type: "APPLY_ASSIGNMENTS", assignments: [{ ...assignment, deferConfirm: true }] });
+          const step = await sendToFrame(tab.id, target.frameId, { type: "APPLY_ASSIGNMENTS", assignments: [{ ...assignment, deferConfirm: !assignment.directLocationSearch }] });
           const pending = (step.diagnostics || []).find((item) => item.reason === "cascade-parent-selected");
           if (!pending) { appendApplied(step, assignment.local ? new Set() : new Set([assignment.key])); break; }
           const children = await sendToFrame(tab.id, target.frameId, { type: "GET_LIVE_OPTIONS", keys: [assignment.key], keepOpen: true, previousOptions: { [assignment.key]: [...seenOptions] } });
@@ -700,7 +712,8 @@ $("ai").addEventListener("click", async () => {
     const awardTarget = structuralAward ? `（${structuralAward.targetIndex >= 0 ? "字段已定位" : "字段未定位"}，日期控件 ${structuralAward.dateControlCount || 0} 个）` : "";
     const awardText = structuralAward ? `；第2条获奖时间：${awardSource}，${reasonText[structuralAward.reason] || structuralAward.reason}${awardChoice}${awardTarget}` : "";
     const diagnosticText = failed.length ? `；AI诊断：${failed.map((item) => {
-      const choice = item.reason === "page-option-or-validation-failed" && item.choice ? (item.choice.optionFound ? `（候选“${item.choice.option || ""}”，点击后“${item.choice.afterClick || "空"}”，确认后“${item.choice.afterConfirm || "空"}”${item.choice.confirmFound ? "，已找到确认" : "，无确认"}）` : "（未找到页面候选）")
+      const area = item.choice?.area;
+      const choice = item.reason === "page-option-or-validation-failed" && item.choice ? (area ? `（地区协议 V${area.protocol || "?"}，值“${area.source || "空"}”，提示“${area.hint || area.companyHint || "空"}”，搜索“${area.city || "空"}”，弹层${area.popupFound ? "有" : "无"}，搜索框${area.searchFound ? "有" : "无"}，候选 ${area.candidates?.length || 0} 个${item.choice.optionFound ? `，匹配“${item.choice.option || ""}”，已选${item.choice.selectionObserved ? "是" : "否"}，确认${item.choice.confirmFound ? "有" : "无"}` : "，未匹配"}，确认后“${item.choice.afterConfirm || "空"}”）` : item.choice.optionFound ? `（候选“${item.choice.option || ""}”，点击后“${item.choice.afterClick || "空"}”，确认后“${item.choice.afterConfirm || "空"}”${item.choice.confirmFound ? "，已找到确认" : "，无确认"}）` : "（未找到页面候选）")
         : "";
       const detail = choice ? "" : item.reason === "low-confidence" && Number.isFinite(Number(item.confidence)) ? `（置信度 ${Number(item.confidence).toFixed(2)}，候选 ${item.optionCount || 0} 个）`
         : ["ai-no-assignment", "not-a-page-option", "candidate-not-read", "options-unavailable"].includes(item.reason) ? `（候选 ${item.optionCount || 0} 个${item.optionSource ? `，${item.optionSource}` : ""}）` : "";
