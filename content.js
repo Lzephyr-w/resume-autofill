@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_PROTOCOL = 51;
+  const CONTENT_PROTOCOL = 57;
   if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -123,6 +123,7 @@
     }
     return el?.parentElement;
   };
+  const atsxSearchInput = (el) => el?.closest?.(".atsx-select-combobox")?.querySelector("input.atsx-select-search__field:not([type=hidden])") || el;
   const associatedLabels = (el) => {
     const ids = clean(el?.getAttribute?.("aria-labelledby")).split(" ").filter(Boolean);
     const nodes = ids.map((id) => document.getElementById(id)).filter(Boolean);
@@ -191,6 +192,8 @@
     return [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some((value) => title.includes(value));
   };
   const repeatedContainer = (el, anchor, section = "") => {
+    const atsxRow = el?.closest?.(".resumeEditForm-item");
+    if (atsxRow) return atsxRow;
     let node = el;
     // Some component forms (including Phoenix) wrap each repeated row deeply;
     // stop only after reaching the actual sibling record, not an inner field.
@@ -222,7 +225,8 @@
   };
   const rowField = (anchor, rowIndex, label, section = "", value = "") => {
     const candidate = rowContainers(anchor, section)[rowIndex];
-    const row = candidate && [...candidate.querySelectorAll(controlSelector)].filter((el) => anchorMatch(el, anchor)).length === 1 ? candidate : null;
+    const anchors = candidate ? [...candidate.querySelectorAll(controlSelector)].filter((el) => anchorMatch(el, anchor)) : [];
+    const row = candidate && (candidate.matches(".resumeEditForm-item") || anchors.length === 1) ? candidate : null;
     if (row && /结束时间|毕业时间|教育结束|工作结束|项目结束/.test(label) && /^(?:至今|现在|在职)$/i.test(String(value).trim())) {
       const current = [...row.querySelectorAll("input[type=checkbox], [role=checkbox]")].find((el) => {
         const text = normalize(labelText(el) || el.parentElement?.textContent);
@@ -231,6 +235,9 @@
       if (current) return current;
     }
     if (row && /开始时间|结束时间|入学时间|毕业时间|教育开始|教育结束|工作开始|工作结束|项目开始|项目结束|获奖时间|获得时间/.test(label)) {
+      const atsxPeriod = row.querySelector(".atsx-date-picker-period-month");
+      const atsxParts = atsxPeriod ? [...atsxPeriod.querySelectorAll(":scope > .atsx-date-picker-period-month-label")] : [];
+      if (atsxParts.length === 2) return /结束时间|毕业时间|教育结束|工作结束|项目结束/.test(label) ? atsxParts[1] : atsxParts[0];
       const dateRange = [...row.querySelectorAll("[class*='date_info'], [class*='date-info'], [class*='dateInfo'], [class*='date-range'], [class*='dateRange']")]
         .map((node) => ({ node, controls: [...node.querySelectorAll("input, [role=combobox]")].filter((el) => visible(el) && !["checkbox", "radio"].includes(el.type)) }))
         .filter(({ controls }) => controls.length === 4)
@@ -241,6 +248,11 @@
       // date group in the record that owns the anchor before choosing a part.
       const dates = (dateTarget ? dateControls(dateTarget) : []).filter((el) => row.contains(el));
       if (dates.length >= 2 && (!/结束时间|毕业时间|教育结束|工作结束|项目结束/.test(label) || dates.length >= 4)) return /结束时间|毕业时间|教育结束|工作结束|项目结束/.test(label) ? dates[2] : dates[0];
+    }
+    if (row && /^(?:工作描述|工作职责|项目描述)$/.test(label)) {
+      const description = [...row.querySelectorAll("textarea, [contenteditable='true']")].filter(editable)
+        .find((el) => /描述|职责|内容|亮点|摘要/.test(fieldTitle(el) || labelText(el)));
+      if (description) return description;
     }
     const item = [...(row?.querySelectorAll(".form-item, .form-group, .field") || [])].find((el) => normalize(el.querySelector(`${fieldLabelSelector}, label`)?.innerText).includes(normalize(label)));
     const direct = row ? [...row.querySelectorAll(controlSelector)].filter(editable)
@@ -253,7 +265,7 @@
     // section when a component library hides the section heading from the DOM.
     const uniqueFallback = !section && /学校|院校|专业|学历|性别|出生日期|所在地|最近公司|奖项名称|获奖项/.test(label)
       ? findField(label, rowIndex) : null;
-    return item?.querySelector(controlSelector) || direct || scoped || uniqueFallback;
+    return atsxSearchInput(item?.querySelector(controlSelector) || direct || scoped || uniqueFallback);
   };
   const labelText = (el) => {
     const parts = [fieldTitle(el), ...associatedLabels(el)];
@@ -298,7 +310,7 @@
   };
   const isExplicitTextInput = (el) => el?.tagName === "INPUT" && !el.readOnly && !el.getAttribute("role") && !el.hasAttribute("aria-haspopup")
     && !!el.closest("[class*='string_info'], [class*='string-info'], [class*='stringInfo'], [data-field-type='string_info']");
-  const isSuggestionControl = (el) => el?.tagName === "INPUT" && !el.readOnly && /autocomplete|suggest|typeahead/i.test([
+  const isSuggestionControl = (el) => el?.tagName === "INPUT" && !el.readOnly && /autocomplete|suggest|typeahead|select[-_ ]search/i.test([
     el.className, el.getAttribute("aria-autocomplete"), el.parentElement?.className, el.parentElement?.getAttribute("role")
   ].join(" "));
   const isAutocompleteControl = (el) => isSuggestionControl(el) || isExplicitTextInput(el) && !!choiceRoot(el);
@@ -306,6 +318,10 @@
     || ["combobox", "radio", "checkbox"].includes(el.getAttribute("role")) || el.hasAttribute("aria-haspopup") || !!choiceRoot(el)) && !isSuggestionControl(el);
   const controlValue = (el, box = fieldContainer(el)) => {
     if (!el) return "";
+    if (atsxPeriodParts(el).includes(el)) {
+      const value = clean(el.innerText || el.textContent);
+      return /^y{4}\s*-\s*m{2}$/i.test(value) ? "" : value;
+    }
     if (el.type === "checkbox" || el.type === "radio" || el.getAttribute("role") === "checkbox" || el.getAttribute("role") === "radio") return el.checked || el.getAttribute("aria-checked") === "true" ? (el.value || "true") : "";
     if (el.tagName !== "SELECT" && (isChoiceControl(el) || isAutocompleteControl(el))) {
       const liveControl = el.isConnected ? el : box?.querySelector(controlSelector);
@@ -333,6 +349,7 @@
     "手机号码": ["手机", "手机号", "手机号码", "联系电话", "电话号码"],
     "邮箱": ["邮箱", "电子邮箱", "邮件地址", "email", "e-mail"],
     "出生日期": ["出生日期", "出生年月", "生日", "birthday"],
+    "年龄": ["年龄", "周岁"],
     "民族": ["民族"],
     "政治面貌": ["政治面貌", "政治身份"],
     "微信号": ["微信", "微信号", "wechat"],
@@ -367,7 +384,8 @@
     "获奖级别": ["奖项级别", "奖励级别", "获奖等级", "获奖级别"],
     "籍贯": ["籍贯", "家乡"],
     "户口所在地": ["户籍所在地", "户籍地", "户口所在地", "户籍地址"],
-    "培养方式": ["学习方式", "就读方式", "受教育类型"],
+    "培养方式": ["学习方式", "就读方式", "受教育类型", "学历类型"],
+    "学历类型": ["培养方式", "学习方式", "就读方式", "受教育类型"],
     "工作描述": ["工作职责", "工作内容", "工作说明"],
     "工作职责": ["工作描述", "工作内容", "工作说明"],
     "工作亮点": ["工作成果", "业绩亮点", "工作成就"],
@@ -385,6 +403,7 @@
     "工作地点": ["工作地点", "工作城市", "办公地点", "工作地区", "办公城市", "任职地点"],
     "离职原因": ["离职原因", "离职缘由"],
     "项目名称": ["项目名称", "项目标题"],
+    "项目链接": ["项目链接", "项目地址", "项目网址", "在线链接", "演示地址", "GitHub链接", "Github链接"],
     "项目职责": ["职责", "项目中职责", "项目职务", "职务", "个人工作", "项目角色", "角色"],
     "获奖项": ["奖励活动", "奖项名称", "奖项"],
     "获奖描述": ["奖励描述", "荣誉描述"],
@@ -398,6 +417,11 @@
     "技能描述": ["技能描述", "技能说明", "技能详情"]
   };
   function findField(label, occurrence = 0, section = "") {
+    // ATSX renders the two personal-ID controls beneath one shared label.
+    // Keep this tied to that composite DOM feature, not a recruiting domain.
+    const idCard = document.querySelector("#id-card-select-component");
+    if (idCard && label === "证件类型") return idCard.querySelector("[role=combobox]") || undefined;
+    if (idCard && label === "证件号码") return idCard.querySelector("input:not([type=hidden])") || undefined;
     const wanted = [label, ...(FIELD_ALIASES[label] || [])].map(normalize);
     const scoreFields = (pool) => pool.map((el) => {
       const attrs = normalize([el.getAttribute("aria-label"), el.getAttribute("placeholder"), el.name, el.id, semanticText(el), labelText(el)].join(" "));
@@ -415,7 +439,7 @@
     const scoped = scoreFields(fields().filter((el) => inSection(el, section)));
     const candidates = scoped.length || !section ? scoped.length ? scoped : scoreFields(fields())
       : scoreFields(fields().filter((el) => !hasKnownSection(sectionTitle(el))));
-    return candidates[occurrence]?.el;
+    return atsxSearchInput(candidates[occurrence]?.el);
   }
   const fieldMatches = (label) => {
     const wanted = [label, ...(FIELD_ALIASES[label] || [])].map(normalize);
@@ -825,10 +849,16 @@
 
   let lastOpenedControl = null;
   let lastChoice = null;
+  const atsxPeriodParts = (target) => {
+    const picker = target?.closest?.(".atsx-date-picker-period-month");
+    return picker ? [...picker.querySelectorAll(":scope > .atsx-date-picker-period-month-label")] : [];
+  };
   const datePartText = (el) => clean(el?.getAttribute?.("placeholder") || el?.getAttribute?.("aria-label")).toLowerCase();
   const isYearPart = (el) => /年|year|yyyy/.test(datePartText(el));
   const isMonthPart = (el) => /月|month|^mm$/.test(datePartText(el));
   const dateControls = (target) => {
+    const atsxParts = atsxPeriodParts(target);
+    if (atsxParts.includes(target)) return atsxParts;
     let nearestPair = [];
     for (let node = target?.parentElement, depth = 0; node && depth < 16; node = node.parentElement, depth++) {
       const isDateRange = /date|month|time/i.test(String(node.className || "")) && /range|info|picker/i.test(String(node.className || ""));
@@ -860,6 +890,10 @@
     const [year, month] = dateParts(expected);
     if (!year || !month) return false;
     const controls = dateControls(target); const index = controls.indexOf(target);
+    if (atsxPeriodParts(target).includes(target)) {
+      const actual = dateParts(controlValue(target));
+      return actual[0] === year && actual[1] === month;
+    }
     if (index >= 0) {
       const first = index - index % 2;
       return Number(String(controlValue(controls[first])).replace(/\D/g, "")) === Number(year)
@@ -886,11 +920,35 @@
     if (!value) { trace.failure = "empty-value"; return false; }
     if (target?.tagName === "SELECT") {
       trace.path = "native-select";
-      trace.confirmed = setValue(target, value);
+      const educationType = /学历类型|受教育类型|培养方式/.test(label) && [...target.options].find((option) =>
+        /非全日制/.test(value) ? /非全日制/.test(option.text) : /全日制/.test(value) ? /全日制/.test(option.text) && !/非全日制/.test(option.text) : false)?.value;
+      trace.confirmed = setValue(target, educationType || value);
       if (!trace.confirmed) trace.failure = "native-select-no-match";
       return trace.confirmed;
     }
     const [year, month, day] = dateParts(value);
+    const atsxParts = atsxPeriodParts(target);
+    if (year && month && atsxParts.includes(target)) {
+      trace.path = "atsx-period-month";
+      target.click();
+      const cy = target.getAttribute("data-cy");
+      const panel = await waitFor(() => cy && document.querySelector(`[data-cy="${CSS.escape(`${cy}Dropdown`)}"]`), 1000);
+      const lists = [...(panel?.querySelectorAll(".atsx-date-picker-period-month-panel-list") || [])];
+      const item = (list, wanted) => [...(list?.querySelectorAll(".atsx-date-picker-period-month-panel-list-item") || [])]
+        .find((node) => node.getAttribute("data-cy") === wanted);
+      const yearItem = item(lists[0], year);
+      trace.datePicker = { protocol: CONTENT_PROTOCOL, panelFound: !!panel, target: cy || "", year, month: Number(month), yearFound: !!yearItem };
+      if (yearItem) yearItem.click();
+      const monthItem = await waitFor(() => item((panel?.isConnected ? panel : document.querySelector(`[data-cy="${CSS.escape(`${cy}Dropdown`)}"]`))?.querySelectorAll(".atsx-date-picker-period-month-panel-list")[1], pad2(month)), 800);
+      trace.datePicker.monthFound = !!monthItem;
+      if (monthItem) monthItem.click();
+      trace.selectedValue = value;
+      trace.confirmed = !!monthItem && !!await waitFor(() => dateValueMatches(target, value), 1000);
+      trace.datePicker.after = controlValue(target);
+      if (!trace.confirmed) trace.failure = monthItem ? "display-not-confirmed" : "atsx-period-option-not-found";
+      await closeVisibleDropdowns(target);
+      return trace.confirmed;
+    }
     const pairedControls = !skipDatePair && year && month ? dateControls(target) : [];
     const pairIndex = pairedControls.indexOf(target);
     const monthControl = isMonthPart(target) || (pairIndex >= 0 && pairIndex % 2 === 1);
@@ -917,7 +975,9 @@
       const numericMonthMatch = numericMonth && /^\d{1,2}$/.test(monthToken) && Number(monthToken) === Number(numericMonth);
       const forms = [...wantedForms, ...optionForms];
       if (/薪|工资|待遇/.test(label)) return forms.some((form) => salaryToken(normalized) === salaryToken(form));
-      return numericMonthMatch || forms.some((form) => normalized === form || normalized.includes(form) || form.includes(normalized));
+      const educationTypeMatch = /学历类型|受教育类型|培养方式/.test(label)
+        && (/非全日制/.test(value) ? /非全日制/.test(normalized) : /全日制/.test(value) ? /全日制/.test(normalized) && !/非全日制/.test(normalized) : false);
+      return numericMonthMatch || educationTypeMatch || forms.some((form) => normalized === form || normalized.includes(form) || form.includes(normalized));
     };
     if (year && month && /(日期|时间)/.test(label)) {
       // Paired year/month Selects stay on the regular option path. A single
@@ -1202,10 +1262,12 @@
             return trace.confirmed;
           }
         }
-        // This picker can search a city directly.  Do not degrade to its
-        // province, which leaves the required city selection empty.
-        trace.failure = "area-city-not-found";
-        return false;
+        // A generic tree without search falls through to its normal
+        // selectionTarget path below; ATSX must not degrade to a province.
+        if (areaPopup.querySelector(".atsx-tree, .atsx-select-tree")) {
+          trace.failure = "area-city-not-found";
+          return false;
+        }
       }
       if (location) {
         // Midas first shows countries. Parent row clicks select a value;
@@ -1239,10 +1301,11 @@
         };
         const expandTreeItem = async (item) => {
           const switcher = item?.querySelector?.(".atsx-tree-switcher, [data-cy=switcher]");
-          const opened = () => !switcher || /(?:^|[_-])open\b/.test(String(switcher.className || ""));
+          const childrenVisible = () => [...(item?.querySelectorAll?.("[role=group]") || [])].some(visible);
+          const opened = () => switcher ? /(?:^|[_-])open\b/.test(String(switcher.className || "")) : childrenVisible();
           if (opened()) return true;
           // ponytail: only trust the debugger click after the tree actually expands.
-          await clickOption(switcher || item, true, opened);
+          await clickOption(switcher || selectionTarget(item), true, opened);
           return !!await waitFor(opened, 1200);
         };
         const mainland = treeItem("中国大陆");
@@ -1409,6 +1472,7 @@
     const splitDate = dateParts(value).length >= 1 && dateControls(target).length >= 2;
     const autocompleteText = isAutocompleteControl(target);
     const changed = splitDate ? await choose(label, value, target, false, applyOptions)
+      : isSuggestionControl(target) ? await writeAndObserveSuggestion(label, value, target, applyOptions)
       : autocompleteText ? await choose(label, value, target, false, applyOptions)
         : target.tagName === "INPUT" && !isChoiceControl(target) ? await writeAndObserveSuggestion(label, value, target, applyOptions)
           : setValue(target, value) || await choose(label, value, target, false, applyOptions);
@@ -1428,7 +1492,11 @@
     const countFields = () => {
       const matches = fields().filter((el) => anchorMatch(el, anchor));
       const scoped = matches.filter((el) => inSection(el, section));
-      return Math.max(rowContainers(anchor, section).length, (scoped.length ? scoped : matches).length);
+      const sectionNames = [section, ...(SECTION_ALIASES[section] || [])].map(normalize);
+      const atsxRows = section ? [...document.querySelectorAll(".createFormSection-repeatable")]
+        .filter((node) => sectionNames.some((name) => name && normalize(node.querySelector(".createFormSection-text")?.textContent).includes(name)))
+        .reduce((total, node) => Math.max(total, node.querySelectorAll(".resumeEditForm-item").length), 0) : 0;
+      return Math.max(atsxRows, rowContainers(anchor, section).length, (scoped.length ? scoped : matches).length);
     };
     const buttonInSection = (el) => {
       if (!section) return true;
@@ -1440,6 +1508,11 @@
     let clicks = 0;
     while (existing < count && clicks < count * 2) {
       const wanted = normalize(label);
+      const sectionNames = [section, ...(SECTION_ALIASES[section] || [])].map(normalize);
+      const atsxSection = [...document.querySelectorAll(".createFormSection-repeatable")].find((node) => {
+        const title = normalize(node.querySelector(".createFormSection-text")?.textContent);
+        return sectionNames.some((name) => name && title.includes(name));
+      });
       // Repeated Phoenix modules expose a stable module-id + _addButton pair.
       // Resolve that first so a deeply nested page cannot select another module.
       const moduleField = fields().find((el) => anchorMatch(el, anchor) && inSection(el, section)) || fields().find((el) => anchorMatch(el, anchor));
@@ -1447,7 +1520,8 @@
       for (let node = moduleField; node && !directButton; node = node.parentElement) {
         if (node.id) directButton = document.getElementById(`${node.id}_addButton`);
       }
-      const button = directButton && visible(directButton) ? directButton : [...document.querySelectorAll("[id$='_addButton'], button, a, [role=button], [class*='add'], [class*='Add']")].find((el) => {
+      const atsxButton = atsxSection?.querySelector(".createFormSection-addBtn, .formOperate-addBtn");
+      const button = atsxButton && visible(atsxButton) ? atsxButton : directButton && visible(directButton) ? directButton : [...document.querySelectorAll("[id$='_addButton'], button, a, [role=button], [class*='add'], [class*='Add']")].find((el) => {
         if (!visible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
         const text = normalize(el.textContent);
         const specific = text.includes(wanted) || buttonPatterns.some((pattern) => pattern.test(text));
@@ -1497,12 +1571,15 @@
     const hasSection = (section) => fields().some((el) => {
       const title = normalize(sectionTitle(el));
       return title && [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some((name) => title.includes(name));
+    }) || [...document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, [role=heading], [class*='title'], [class*='Title'], .createFormSection-text")].some((el) => {
+      const title = normalize(clean(el.innerText || el.textContent));
+      return [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some((name) => title === name);
     });
     const allExperienceRows = profile.experiences?.length ? profile.experiences : [...(profile.internships || []), ...(profile.work || [])];
     const hasInternshipSection = hasSection("实习经历");
     const workRows = hasInternshipSection ? (profile.work || []) : allExperienceRows;
     const internshipRows = hasInternshipSection ? (profile.internships?.length ? profile.internships : (profile.work || []).filter((row) => /实习|intern/i.test(`${row?.workType || ""} ${row?.title || ""}`))) : [];
-    const simple = [["姓名", profile.name], ["手机号码", profile.phone], ["邮箱", profile.email], ["出生日期", profile.birthDate], ["民族", profile.nationality], ["政治面貌", profile.politicalStatus], ["户口所在地", profile.householdRegistration], ["工作经验", profile.workExperience], ["籍贯", profile.nativePlace], ["现居住地", profile.currentResidence], ["微信号", profile.wechat], ["最近公司", allExperienceRows[0]?.company], ["当前就读学校学号", profile.education?.[0]?.studentId], ["兴趣爱好", profile.extras?.hobbies], ["特长", profile.extras?.specialty], ["个人评价", profile.extras?.selfEvaluation], ["获奖经历", profile.extras?.awards], ["学生干部经历", profile.extras?.studentCadres]];
+    const simple = [["姓名", profile.name], ["手机号码", profile.phone], ["邮箱", profile.email], ["出生日期", profile.birthDate], ["年龄", profile.age], ["民族", profile.nationality], ["政治面貌", profile.politicalStatus], ["户口所在地", profile.householdRegistration], ["工作经验", profile.workExperience], ["籍贯", profile.nativePlace], ["现居住地", profile.currentResidence], ["微信号", profile.wechat], ["最近公司", allExperienceRows[0]?.company], ["当前就读学校学号", profile.education?.[0]?.studentId], ["兴趣爱好", profile.extras?.hobbies], ["特长", profile.extras?.specialty], ["个人评价", profile.extras?.selfEvaluation], ["获奖经历", profile.extras?.awards], ["学生干部经历", profile.extras?.studentCadres]];
     for (const [label, value] of simple) {
       if (!value) continue;
       const field = findField(label);
@@ -1575,13 +1652,13 @@
     }
     const certificateGroup = [profile.certificates, [["证书名称", "name"], ["获得时间", "date"], ["证书描述", "description"]], "证书名称", "证书"];
     const groups = [
-      [profile.education, [["学校名称", "school"], ["学院名称", "college"], ["专业名称", "major"], ["学历", "degree"], ["开始时间", "start"], ["结束时间", "end"], ["培养方式", "training"], ["GPA", "gpa"], ["成绩排名", "rank"]], "学校名称", "教育背景"],
+      [profile.education, [["学校名称", "school"], ["学院名称", "college"], ["专业名称", "major"], ["学历", "degree"], ["开始时间", "start"], ["结束时间", "end"], ["学历类型", "training"], ["GPA", "gpa"], ["成绩排名", "rank"]], "学校名称", "教育背景"],
       certificateGroup,
       [profile.skills, [["技能名称", "name"], ["掌握程度", "proficiency"], ["使用时间总计", "duration"], ["技能描述", "description"]], "技能名称", "技能"],
       [profile.languages, [["语言类型", "language"], ["掌握程度", "proficiency"], ["听说", "speaking"], ["读写", "reading"]], "语言类型", "语言能力"],
       [workRows, [["公司名称", "company"], ["所在部门", "department"], ["职位名称", "title"], ["工作性质", "workType"], ["开始时间", "start"], ["结束时间", "end"], ["月薪(税前)", "salary"], ["工作地点", "location"], ["离职原因", "reason"], ["工作描述", "description"], ["工作职责", "description"], ["工作亮点", "highlights"]], "公司名称", "工作经历"],
       [internshipRows, [["公司名称", "company"], ["所在部门", "department"], ["职位名称", "title"], ["工作性质", "workType"], ["开始时间", "start"], ["结束时间", "end"], ["月薪(税前)", "salary"], ["工作地点", "location"], ["离职原因", "reason"], ["工作描述", "description"], ["工作职责", "description"], ["工作亮点", "highlights"]], "公司名称", "实习经历"],
-      [profile.projects, [["项目名称", "name"], ["项目职责", "role"], ["项目中职责", "responsibilities"], ["开始时间", "start"], ["结束时间", "end"], ["项目描述", "description"]], "项目名称", "项目经验"],
+      [profile.projects, [["项目名称", "name"], ["项目职责", "role"], ["项目中职责", "responsibilities"], ["开始时间", "start"], ["结束时间", "end"], ["项目链接", "link"], ["项目描述", "description"]], "项目名称", "项目经验"],
       [profile.cadres, [["职务", "position"], ["级别", "level"], ["开始时间", "start"], ["结束时间", "end"], ["工作职责", "duty"]], "职务", "学生干部经历"],
       [profile.awards, [["获奖项", "name"], ["获奖时间", "date"], ["获奖级别", "level"], ["获奖描述", "description"]], "获奖项", "获奖经历"]
     ];

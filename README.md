@@ -52,5 +52,6 @@ python -m http.server 8765 --bind 127.0.0.1
 - `http://127.0.0.1:8765/tests/mock-form.html?ui=phoenix-year-title`
 - `http://127.0.0.1:8765/tests/mock-form.html?ui=phoenix-misleading`
 - `http://127.0.0.1:8765/tests/mock-form.html?ui=cascade`
+- `http://127.0.0.1:8765/tests/mock-form.html?ui=atsx`
 
 六页均显示 `PASS` 即通过；用例覆盖已有值保护、地区防串填、日期、单选、原生/自定义/Phoenix 下拉、通用多级候选、惰性候选、事件触发，以及工作、项目、干部、技能、语言、获奖的多条扩行。

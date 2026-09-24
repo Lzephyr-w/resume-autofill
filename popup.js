@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
 const emptyProfile = () => ({
-  name: "", phone: "", email: "", gender: "", birthDate: "", nationality: "", politicalStatus: "", wechat: "", nativePlace: "", currentResidence: "", householdRegistration: "", workExperience: "",
+  name: "", phone: "", email: "", gender: "", birthDate: "", age: "", nationality: "", politicalStatus: "", wechat: "", nativePlace: "", currentResidence: "", householdRegistration: "", workExperience: "",
   jobIntent: { industry: "", occupation: "", currentSalary: "", expectedSalary: "", city: "", arrival: "" },
   education: [], experiences: [], work: [], internships: [], projects: [], cadres: [], skills: [], languages: [], certificates: [], awards: [], customFields: {}, extras: { hobbies: "", specialty: "", selfEvaluation: "", skills: "", languages: "", awards: "", studentCadres: "" }
 });
@@ -48,7 +48,7 @@ function awardsFromText(value) {
 
 const aliases = {
   name: ["姓名", "名字"], phone: ["手机", "手机号", "电话", "联系电话"], email: ["邮箱", "电子邮箱", "email"],
-  gender: ["性别"], birthDate: ["出生日期", "生日"], nationality: ["国籍", "民族"], politicalStatus: ["政治面貌"], wechat: ["微信号"], nativePlace: ["籍贯"], currentResidence: ["现居住地", "当前居住地", "现居地", "居住地"], workExperience: ["工作经验", "工作年限", "经验年限"],
+  gender: ["性别"], birthDate: ["出生日期", "生日"], age: ["年龄", "周岁"], nationality: ["国籍", "民族"], politicalStatus: ["政治面貌"], wechat: ["微信号"], nativePlace: ["籍贯"], currentResidence: ["现居住地", "当前居住地", "现居地", "居住地"], workExperience: ["工作经验", "工作年限", "经验年限"],
   city: ["期望工作城市", "工作城市", "意向城市"], arrival: ["到岗时间", "入职时间"],
   expectedSalary: ["期望月薪", "期望薪资"], currentSalary: ["现月薪", "当前薪资"],
   industry: ["期望从事行业", "意向行业"], occupation: ["期望从事职业", "意向职位"],
@@ -62,7 +62,7 @@ const aliases = {
 function cleanProfile(input) {
   const base = emptyProfile();
   const p = input || {};
-  ["name", "phone", "email", "gender", "birthDate", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience"].forEach((key) => {
+  ["name", "phone", "email", "gender", "birthDate", "age", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience"].forEach((key) => {
     if (p[key] != null) base[key] = String(p[key]).trim();
   });
   const legacyIntentKeys = {
@@ -126,7 +126,7 @@ function cleanProfile(input) {
   base.customFields = Object.fromEntries(Object.entries(p.customFields || {})
     .map(([key, value]) => [String(key).trim(), String(value ?? "").trim()])
     .filter(([key, value]) => key && value));
-  const standard = new Set(["name", "phone", "email", "gender", "birthDate", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience", "jobIntent", "education", "experiences", "work", "internships", "projects", "cadres", "skills", "languages", "certificates", "awards", "customFields", "extras"]);
+  const standard = new Set(["name", "phone", "email", "gender", "birthDate", "age", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience", "jobIntent", "education", "experiences", "work", "internships", "projects", "cadres", "skills", "languages", "certificates", "awards", "customFields", "extras"]);
   Object.entries(p).forEach(([key, value]) => {
     if (!standard.has(key) && value != null && typeof value !== "object" && String(value).trim()) base.customFields[key] = String(value).trim();
   });
@@ -288,7 +288,7 @@ function parseText(text) {
   const p = emptyProfile();
   p.name = findValue(lines, aliases.name); p.phone = findValue(lines, aliases.phone);
   p.email = findValue(lines, aliases.email); p.gender = findValue(lines, aliases.gender);
-  p.birthDate = findValue(lines, aliases.birthDate); p.nationality = findValue(lines, aliases.nationality);
+  p.birthDate = findValue(lines, aliases.birthDate); p.age = findValue(lines, aliases.age); p.nationality = findValue(lines, aliases.nationality);
   p.politicalStatus = findValue(lines, aliases.politicalStatus);
   p.wechat = findValue(lines, aliases.wechat); p.nativePlace = findValue(lines, aliases.nativePlace);
   p.currentResidence = findValue(lines, aliases.currentResidence);
@@ -323,7 +323,7 @@ function parseText(text) {
     const college = collegeValue || (parts.length > 1 ? parts[0] : "");
     const gpaText = educationBody.match(/GPA\s*[：:]?\s*([^\n]+)/i)?.[1]?.trim() || "";
     const rank = educationBody.match(/(?:专业排名|排名)\s*[：:]?\s*([^\n]+)/)?.[1]?.trim() || gpaText.match(/\/\s*(\d+(?:\.\d+)?%)/)?.[1] || "";
-    p.education.push({ school: school.replace(/^学校[：:]\s*/, "").replace(/\s*(计算机学院|软件学院|信息学院)$/, ""), college, major, degree: degreeValue || before.find((line) => /本科|硕士|博士|大专/.test(line))?.replace(/^(?:学历|学位)[：:]\s*/, "") || "", studentId, start: startValue || dateParts[0] || "", end: endValue || dateParts[1] || "", gpa: gpaText, rank, training: findValue(educationLines, ["培养方式", "学习方式", "就读方式"]) });
+    p.education.push({ school: school.replace(/^学校[：:]\s*/, "").replace(/\s*(计算机学院|软件学院|信息学院)$/, ""), college, major, degree: degreeValue || before.find((line) => /本科|硕士|博士|大专/.test(line))?.replace(/^(?:学历|学位)[：:]\s*/, "") || "", studentId, start: startValue || dateParts[0] || "", end: endValue || dateParts[1] || "", gpa: gpaText, rank, training: findValue(educationLines, ["培养方式", "学习方式", "就读方式", "学历类型", "受教育类型"]) });
   }
   p.work = parseExperienceRows(sectionBody(source, ["工作经历"]));
   p.internships = parseExperienceRows(sectionBody(source, ["实习经历"]));
@@ -357,7 +357,7 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
-const CONTENT_MESSAGE_SUFFIX = "_V51";
+const CONTENT_MESSAGE_SUFFIX = "_V57";
 const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
 const injectCurrentContent = (tabId) => {
   if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");
@@ -745,13 +745,13 @@ $("ai").addEventListener("click", async () => {
 
 const MANUAL_STORAGE_KEY = "applicationFormData";
 const MANUAL_SINGLE_FIELD_IDS = [
-  "fullName", "gender", "phone", "email", "birthDate", "idType", "idNumber", "nativePlace",
+  "fullName", "gender", "phone", "email", "birthDate", "age", "idType", "idNumber", "nativePlace",
   "wechat", "nationality", "politicalStatus", "currentResidence", "householdRegistration", "workExperience", "intentIndustry", "intentOccupation", "intentCurrentSalary", "intentExpectedSalary", "intentCity", "intentArrival", "skills", "selfEvaluation"
 ];
 const REPEAT_GROUPS = {
   educations: { firstId: "university", label: "教育经历", addLabel: "新增教育经历", fields: [["degree", "education"], ["training", "educationType"], ["school", "university"], ["college", "college"], ["major", "major"], ["start", "educationStart"], ["end", "graduationYear"], ["gpa", "gpa"]] },
   experiences: { firstId: "internCompany1", label: "经历", addLabel: "新增实习/工作经历", fields: [["company", "internCompany"], ["department", "internDepartment"], ["title", "internPosition"], ["start", "internStart"], ["end", "internEnd"], ["salary", "internSalary"], ["location", "internLocation"], ["reason", "internReason"], ["description", "internContent"]] },
-  projects: { firstId: "projectName1", label: "项目", addLabel: "新增项目", fields: [["name", "projectName"], ["role", "projectRole"], ["start", "projectStart"], ["end", "projectEnd"], ["description", "projectDesc"], ["responsibilities", "projectDuty"]] },
+  projects: { firstId: "projectName1", label: "项目", addLabel: "新增项目", fields: [["name", "projectName"], ["role", "projectRole"], ["start", "projectStart"], ["end", "projectEnd"], ["link", "projectLink"], ["description", "projectDesc"], ["responsibilities", "projectDuty"]] },
   cadres: { firstId: "cadrePosition1", label: "干部经历", addLabel: "新增干部经历", fields: [["position", "cadrePosition"], ["level", "cadreLevel"], ["start", "cadreStart"], ["end", "cadreEnd"], ["duty", "cadreDuty"]] },
   languageAbilities: { firstId: "languageType1", label: "语言能力", addLabel: "新增语言能力", fields: [["language", "languageType"], ["proficiency", "languageProficiency"], ["speaking", "languageSpeaking"], ["reading", "languageReading"]] },
   certificates: { firstId: "languageCert1", label: "证书", addLabel: "新增证书", fields: [["name", "languageCert"], ["score", "languageScore"], ["date", "languageDate"]] },
@@ -863,7 +863,7 @@ function manualProfileFromForm(data) {
   if (educations[0]?.end) customFields.毕业年份 = educations[0].end;
   return cleanProfile({
     name: data.fullName, phone: data.phone, email: data.email, gender: data.gender,
-    birthDate: data.birthDate, nativePlace: data.nativePlace, wechat: data.wechat,
+    birthDate: data.birthDate, age: data.age, nativePlace: data.nativePlace, wechat: data.wechat,
     nationality: data.nationality, politicalStatus: data.politicalStatus,
     currentResidence: data.currentResidence, householdRegistration: data.householdRegistration, workExperience: data.workExperience,
     education: educations,
@@ -883,7 +883,7 @@ function manualProfileFromForm(data) {
 function manualFormFromProfile(profile) {
   return {
     fullName: profile?.name, gender: profile?.gender, phone: profile?.phone, email: profile?.email,
-    birthDate: profile?.birthDate, idType: profile?.customFields?.证件类型,
+    birthDate: profile?.birthDate, age: profile?.age, idType: profile?.customFields?.证件类型,
     idNumber: profile?.customFields?.证件号码, nativePlace: profile?.nativePlace,
     wechat: profile?.wechat, nationality: profile?.nationality, politicalStatus: profile?.politicalStatus,
     currentResidence: profile?.currentResidence,
@@ -985,6 +985,7 @@ console.assert(parseText("现居住地：广东省广州市").currentResidence =
 console.assert(parseText("自定义字段：自定义内容").customFields.自定义字段 === "自定义内容");
 console.assert(parseText("教育经历\n学校：广东工业大学\n学院：计算机学院\n专业：计算机科学与技术\n学号：3223004472").education[0].college === "计算机学院");
 console.assert(parseText("教育经历\n学习方式：全日制").education[0].training === "全日制");
+console.assert(parseText("教育经历\n受教育类型：统招全日制").education[0].training === "统招全日制");
 console.assert(parseText('{"education":[{"school":"A","start":"2025-01","end":"2024-01"}]}').education[0].start === "2024-01");
 console.assert(parseText("项目经历\n项目A\n2024.01 — 2024.02\n摘要\n核心职责：负责实现").projects[0].responsibilities === "核心职责：负责实现");
 const preservedExperience = parseText("工作经历\n公司A｜产品部\n前端开发 2024.01 — 2024.02\n职责：\n负责页面开发\n亮点：\n1. 封装组件\n2. 优化请求").work[0];

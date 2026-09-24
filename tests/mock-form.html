@@ -21,6 +21,7 @@
   <pre id="result">运行中…</pre>
   <script>
     const ui = new URLSearchParams(location.search).get("ui") || "native";
+    const atsx = ui === "atsx";
     const cascade = ui === "cascade";
     const moka = ui === "moka";
     const component = ui === "component" || cascade || moka;
@@ -47,6 +48,10 @@
     const treeLocation = () => `<div class="mock-midas-tree"><div id="midasLocation" role="combobox" data-midas-tree tabindex="0" aria-expanded="false"><span class="ant-select-selection-item"></span></div><ul role="tree" hidden style="position:fixed;background:white"><li role="treeitem" data-midas-parent><span class="atsx-tree-title" data-cy-value="广东">广东</span><ul role="group" hidden><li role="treeitem" data-midas-city><span class="atsx-tree-title" data-cy-value="广州">广州</span></li></ul></li></ul></div>`;
     const datePart = (id, placeholder, values) => `<div id="${id}" class="mock-date-part" role="combobox" tabindex="0" aria-expanded="false" placeholder="${placeholder}"><span class="ant-select-selection-item date-option-value"></span></div><div role="listbox" hidden>${values.map((value) => `<div role="option">${value}</div>`).join("")}</div>`;
     const dateRange = (label, kind, index) => item(label, `<div class="mock-date-range-info">${datePart(`${kind}StartYear${index}`, "年", ["2020", "2021", "2022", "2023", "2024", "2025"])}${datePart(`${kind}StartMonth${index}`, "月", ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"])}-${datePart(`${kind}EndYear${index}`, "", ["2020", "2021", "2022", "2023", "2024", "2025", "2026"])}${datePart(`${kind}EndMonth${index}`, "", ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"])}</div>`);
+    const atsxDate = (kind, index) => `<div class="atsx-row atsx-form-item"><div class="atsx-form-item-label">起止时间</div><div class="atsx-date-picker atsx-date-picker-period-month"><div class="atsx-date-picker-period-month-label" data-cy="${kind}[${index}].periodInputBegin"><span data-cy="year">YYYY</span>-<span data-cy="month">MM</span></div><div class="atsx-date-picker-period-month-label" data-cy="${kind}[${index}].periodInputEnd"><span data-cy="year">YYYY</span>-<span data-cy="month">MM</span></div><input class="atsx-date-picker-period-hidden-input"></div></div>`;
+    const atsxRow = (kind, index) => `<div class="resumeEditForm-item resumeEditForm-${kind}">${atsxDate(kind, index)}<div class="atsx-row atsx-form-item"><label>${kind === "project" ? "项目名称" : "公司名称"}</label><input id="${kind}${index}" type="text"></div><div class="atsx-row atsx-form-item"><div class="atsx-form-item-label">描述</div><textarea id="${kind}${index}Desc"></textarea></div></div>`;
+    const atsxEducationRow = () => `<div class="resumeEditForm-item resumeEditForm-education">${atsxDate("education", 0)}<div class="atsx-row atsx-form-item"><div class="atsx-form-item-label">学校名称</div><div class="atsx-select atsx-select-combobox"><div role="combobox" data-cy="education[0].schoolInput"><input id="education[0].school" class="atsx-select-search__field" type="text"></div></div></div><div class="atsx-row atsx-form-item"><div class="atsx-form-item-label">学历类型</div><select id="educationType"><option value="">请选择</option><option>统招全日制</option><option>统招非全日制</option></select></div></div>`;
+    const atsxSection = (kind, title, rows) => `<div class="resumeEditForm-${kind} createFormSection-repeatable"><div class="createFormSection-left"><p class="createFormSection-text">${title}</p></div><div class="createFormSection-right"><div id="${kind}Rows" class="createFormSection-formList">${rows}</div><div class="createFormSection-addBtn" data-atsx-add="${kind}">添加</div></div></div>`;
     const yearMonth = (label, kind, index) => `<div class="apply-field"><div class="title-award">${label}</div>${datePart(`${kind}Year${index}`, "年", ["2023", "2024", "2025"])}${datePart(`${kind}Month${index}`, "月", ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"])}</div>`;
     const radio = (label, name, options) => component
       ? item(label, options.map((x) => `<label><input type="radio" name="${name}" value="${x}">${x}</label>`).join(""))
@@ -65,9 +70,10 @@
       : yearMonth("获奖时间", kind, index) + input("获奖项", `${kind}Name${index}`)
     )}</div>`;
     const add = (kind, text) => phoenix ? `<div id="${kind}Rows_addButton" data-add="${kind}">${text}</div>` : `<button type="button" data-add="${kind}">${text}</button>`;
-    document.querySelector("#variant").textContent = component ? "组件库结构（ant-form-item + 自定义下拉）" : phoenix ? "智联 Phoenix 结构（月份面板 + div 新增按钮）" : "原生表单结构";
+    document.querySelector("#variant").textContent = atsx ? "ATSX 复合证件与年月范围结构" : component ? "组件库结构（ant-form-item + 自定义下拉）" : phoenix ? "智联 Phoenix 结构（月份面板 + div 新增按钮）" : "原生表单结构";
     const cascadeFixture = `<section><h2>通用级联回归</h2>${item("所在地点", treeLocation())}${item("期望工作城市", cascadeControl("genericIntentCity", "广东省", ["广州市", "深圳市"]))}${item("期望从事行业", cascadeControl("genericIndustry", "信息技术", ["互联网软件服务", "硬件制造"]))}${item("期望从事职业", cascadeControl("genericOccupation", "技术研发", ["Web前端工程师", "Java工程师"]))}${item("歧义职业", cascadeControl("genericAmbiguous", "技术研发", ["前端开发工程师", "前端开发实习生"]))}</section><section><h2>工作经历</h2><div class="repeat-row">${input("公司名称", "genericCompany1")}${item("工作地点", cascadeControl("genericWorkCity1", "广东省", ["广州市", "深圳市"]))}</div><div class="repeat-row">${input("公司名称", "genericCompany2")}${item("工作地点", cascadeControl("genericWorkCity2", "浙江省", ["杭州市", "宁波市"]))}</div></section>`;
-    document.querySelector("#form").innerHTML = cascade ? cascadeFixture : `
+    const atsxFixture = `<section><h2>个人信息</h2><label class="form-item">个人证件<div id="id-card-select-component"><div role="combobox" tabindex="0"><span class="atsx-select-selection-selected-value"></span></div><input type="text"></div></label></section>${atsxSection("education", "教育经历", atsxEducationRow())}${atsxSection("internship", "实习经历", "")}${atsxSection("project", "项目经历", atsxRow("project", 0))}`;
+    document.querySelector("#form").innerHTML = atsx ? atsxFixture : cascade ? cascadeFixture : `
       <section><h2>个人信息</h2>${input("姓名", "name", "页面已有姓名")}${input("手机号码", "phone")}${input("电子邮箱", "email")}${item("出生日期", '<input id="birthDate" type="date">')}${select("性别", "gender", ["男", "女"])}${select("最高学历", "highestDegree", ["本科", "硕士"])}${radio("政治面貌", "politicalStatus", ["群众", "中共党员"])}${input("籍贯", "nativePlace")}${input("现居住地", "currentResidence")}${input("户口所在地", "householdRegistration")}</section>
        <section><h2>求职意向</h2>${select("期望行业", "intentIndustry", ["制造业", "互联网/电子商务"], "", component)}${select("意向职位", "intentOccupation", ["前端开发", "产品经理"])}${select("目前月薪（税前）", "intentCurrentSalary", ["页面已有月薪", "7k"], "页面已有月薪")}${select("期望月薪（税前）", "intentExpectedSalary", ["2001～4000", "8001～10000"])}${select("期望工作地点", "intentCity", ["广州", "深圳"])}${component ? item("级联工作地点", '<div class="mock-cascade"><div id="cascadeCity" role="combobox" tabindex="0" aria-expanded="false"><span class="ant-select-selection-item"></span></div><div role="listbox" hidden><div role="option" data-cascade-parent>广东省</div></div><div class="plain-confirm" hidden><span>确定</span></div></div>') + item("可搜索级联地点", '<div class="mock-cascade"><div id="searchCascadeCity" role="combobox" tabindex="0" aria-expanded="false"><span class="ant-select-selection-item"></span></div><div role="listbox" hidden><input class="mock-location-search" placeholder="搜索"><div role="option" data-cascade-parent>广东省</div></div><div class="plain-confirm" hidden><span>确定</span></div></div>') + item("重渲染级联城市", '<div class="mock-cascade mock-rerender"><input id="rerenderCity" role="combobox" tabindex="0" aria-expanded="false"><div role="listbox" hidden><div role="option" data-rerender-parent><span class="mock-selection-icon" data-select-marker><svg class="area-icon-RadioUnchecked"></svg></span><span>广东省</span><span class="mock-arrow"></span></div></div><div class="plain-confirm" hidden><span>确定</span></div></div>') : ""}</section>
        <section><h2>候选歧义回归</h2>${select("候选职业", "ambiguousOccupation", ["前端开发工程师", "前端开发实习生"])}</section>
@@ -81,7 +87,7 @@
       <section><h2>语言能力</h2><div id="languageRows">${row("language", 1)}</div><button type="button" data-add="language">添加语言能力</button></section>
       <section><h2>证书</h2><div id="certificateRows">${row("certificate", 1)}</div><button type="button" data-add="certificate">添加证书</button></section>
        <section><h2>自我描述</h2>${item("自我描述", '<textarea id="selfEvaluation"></textarea>')}</section>`;
-     if (!cascade) {
+     if (!cascade && !atsx) {
       const industryControl = document.querySelector("#intentIndustry");
       const occupationControl = document.querySelector("#intentOccupation");
       const occupationOptions = ["前端开发工程师", "产品经理"];
@@ -99,6 +105,32 @@
       industryControl?.addEventListener("change", updateOccupation);
      }
     document.addEventListener("click", (event) => {
+       const atsxDateTarget = event.target.closest(".atsx-date-picker-period-month-label");
+       if (atsxDateTarget && !document.querySelector(`[data-atsx-for="${atsxDateTarget.dataset.cy}"]`)) {
+         document.body.insertAdjacentHTML("beforeend", `<div data-atsx-for="${atsxDateTarget.dataset.cy}" data-cy="${atsxDateTarget.dataset.cy}Dropdown" class="atsx-date-picker-dropdown"><div class="atsx-date-picker-period-month-panel-list" data-atsx-part="year">${["2023", "2024", "2025", "2026"].map((value) => `<div class="atsx-date-picker-period-month-panel-list-item" data-cy="${value}">${value}</div>`).join("")}</div><div class="atsx-date-picker-period-month-panel-list" data-atsx-part="month">${Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0")).map((value) => `<div class="atsx-date-picker-period-month-panel-list-item" data-cy="${value}">${value}</div>`).join("")}</div></div>`);
+       }
+       const atsxDateItem = event.target.closest(".atsx-date-picker-period-month-panel-list-item");
+       if (atsxDateItem) {
+         const panel = atsxDateItem.closest("[data-atsx-for]");
+         if (panel?.querySelector("[data-atsx-part='year']")?.contains(atsxDateItem)) panel.dataset.year = atsxDateItem.dataset.cy;
+         else {
+           const target = document.querySelector(`[data-cy="${panel.dataset.atsxFor}"]`);
+           target.querySelector("[data-cy='year']").textContent = panel.dataset.year;
+           target.querySelector("[data-cy='month']").textContent = atsxDateItem.dataset.cy;
+           target.dispatchEvent(new Event("input", { bubbles: true }));
+           target.dispatchEvent(new Event("change", { bubbles: true }));
+           panel.remove();
+         }
+         return;
+       }
+       const atsxAdd = event.target.closest("[data-atsx-add]");
+       if (atsxAdd) { const kind = atsxAdd.dataset.atsxAdd; const host = document.querySelector(`#${kind}Rows`); host.insertAdjacentHTML("beforeend", atsxRow(kind, host.children.length)); return; }
+       const idType = event.target.closest("#id-card-select-component [role=combobox]");
+       if (idType && !document.querySelector("[data-mock-id-types]")) document.body.insertAdjacentHTML("beforeend", '<div class="atsx-select-dropdown" data-mock-id-types><div role="option" data-mock-id-type>身份证</div><div role="option" data-mock-id-type>护照</div></div>');
+       const idOption = event.target.closest("[data-mock-id-type]");
+       if (idOption) { document.querySelector("#id-card-select-component .atsx-select-selection-selected-value").textContent = idOption.textContent; idOption.closest("[data-mock-id-types]").remove(); return; }
+       const atsxSchoolOption = event.target.closest("[data-atsx-school-option]");
+       if (atsxSchoolOption) { const input = document.querySelector('input[id="education[0].school"]'); input.value = atsxSchoolOption.textContent.trim(); input.dispatchEvent(new Event("change", { bubbles: true })); atsxSchoolOption.parentElement.remove(); return; }
        const combobox = event.target.closest("[role=combobox]");
        if (combobox?.nextElementSibling?.getAttribute("role") === "listbox") { const list = combobox.nextElementSibling; const plainConfirm = combobox.closest(".phoenix-select, .mock-cascade")?.querySelector(".plain-confirm"); list.hidden = !list.hidden; if (plainConfirm) plainConfirm.hidden = list.hidden; combobox.setAttribute("aria-expanded", String(!list.hidden)); }
        if (combobox?.hasAttribute("data-midas-tree")) { const tree = combobox.nextElementSibling; tree.hidden = !tree.hidden; combobox.setAttribute("aria-expanded", String(!tree.hidden)); }
@@ -139,6 +171,8 @@
       if (moka) { document.querySelector("[data-moka-popup]")?.remove(); document.body.insertAdjacentHTML("beforeend", `<div data-moka-popup class="phoenix-autocomplete-popup" style="position:fixed;left:20px;top:20px;background:white"><div role="option" data-moka-option data-for="${moka.id}">${moka.id === "mokaSchool" ? "测试大学" : "计算机"}</div></div>`); }
       const sd = event.target.closest("input[data-sd-autocomplete]");
       if (sd) { document.querySelector("[data-sd-popup]")?.remove(); document.body.insertAdjacentHTML("beforeend", `<div data-sd-popup class="sd-Select-dropdown" style="position:fixed;left:20px;top:20px;background:white"><div class="sd-Menu-content-item" data-sd-option data-for="${sd.id}">${sd.id === "nestedSchool" ? "测试大学" : "计算机"}</div></div>`); }
+      const atsxSchool = event.target.closest("input.atsx-select-search__field");
+      if (atsxSchool) { document.querySelector("[data-atsx-school-popup]")?.remove(); document.body.insertAdjacentHTML("beforeend", '<div data-atsx-school-popup class="atsx-select-dropdown" style="position:fixed"><div role="option" data-atsx-school-option>测试大学</div></div>'); }
     });
     document.addEventListener("pointerdown", (event) => event.target.closest("[data-moka-option], [data-sd-option]")?.setAttribute("data-pointer-ready", "true"));
     document.addEventListener("scroll", (event) => {
@@ -154,13 +188,40 @@
     document.querySelector("#form").addEventListener("change", (event) => changed.add(`change:${event.target.id || event.target.name}`));
     globalThis.__RESUME_AUTOFILL_TEST__ = true;
   </script>
-  <script src="../content.js?v=cascade-v4-atomic"></script>
+  <script src="../content.js?v=atsx-v9-descriptions"></script>
   <script>
     (async () => {
       if (ui === "phoenix-anchor") {
         const field = globalThis.__resumeAutofillTest.formSchema().find((item) => item.id === "projectEnd1");
         const report = await globalThis.__resumeAutofillTest.applyAssignments([{ key: field.key, index: field.index, label: field.label, value: "2027.06.30", confidence: 1 }]);
         const passed = report.filled === 1 && document.querySelector("#projectEnd1").value === "2027-06";
+        const output = document.querySelector("#result");
+        output.className = passed ? "pass" : "fail";
+        output.textContent = `${passed ? "PASS" : "FAIL"} ${ui}\n${JSON.stringify(report, null, 2)}`;
+        return;
+      }
+      if (atsx) {
+        const profile = {
+          customFields: { 证件类型: "护照", 证件号码: "110101199001011234" },
+          education: [{ school: "测试大学", start: "2024-01", end: "2024-06", training: "全日制" }],
+          internships: [{ company: "实习一", start: "2024-01", end: "2024-06", description: "实习一描述" }, { company: "实习二", start: "2024-07", end: "2024-12", description: "实习二描述" }],
+          projects: [{ name: "项目一", start: "2024-01", end: "2024-06", description: "项目一描述" }, { name: "项目二", start: "2024-07", end: "2024-12", description: "项目二描述" }]
+        };
+        const report = await globalThis.__resumeAutofillTest.fill(profile, { onlyEmpty: true });
+        const date = (kind, index, part) => document.querySelector(`[data-cy="${kind}[${index}].periodInput${part}"]`)?.textContent.trim();
+        const passed = document.querySelector("#id-card-select-component .atsx-select-selection-selected-value")?.textContent.trim() === "护照"
+          && document.querySelector("#id-card-select-component input")?.value === profile.customFields.证件号码
+          && document.querySelector('input[id="education[0].school"]')?.value === "测试大学"
+          && document.querySelector("#educationType")?.value === "统招全日制"
+          && document.querySelectorAll("#projectRows .resumeEditForm-item").length === 2
+          && document.querySelectorAll("#internshipRows .resumeEditForm-item").length === 2
+          && document.querySelector("#project1")?.value === "项目二"
+          && document.querySelector("#internship1")?.value === "实习二"
+          && document.querySelector("#project1Desc")?.value === "项目二描述"
+          && document.querySelector("#internship1Desc")?.value === "实习二描述"
+          && date("project", 0, "Begin") === "2024-01" && date("project", 0, "End") === "2024-06"
+          && date("education", 0, "Begin") === "2024-01" && date("education", 0, "End") === "2024-06"
+          && report.diagnostics?.structuredAttempts?.some((item) => item.section === "项目经验" && item.row === 1 && item.label === "结束时间" && item.reason === "filled");
         const output = document.querySelector("#result");
         output.className = passed ? "pass" : "fail";
         output.textContent = `${passed ? "PASS" : "FAIL"} ${ui}\n${JSON.stringify(report, null, 2)}`;
