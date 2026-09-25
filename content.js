@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_PROTOCOL = 60;
+  const CONTENT_PROTOCOL = 61;
   if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -730,7 +730,7 @@
     const areaItem = option?.closest?.("[class*='area-item-container'], [class*='Area-item-container']");
     if (areaItem) return areaItem.querySelector("[class*='icon-container'], [class*='Icon-container']") || areaItem;
     const listItem = option?.closest?.("[class*='list-item-container'], [class*='List-item-container']");
-    if (listItem) return listItem.querySelector("[class*='icon-container'], [class*='Icon-container']") || listItem;
+    if (listItem) return listItem;
     const marker = option?.querySelector?.("input[type=checkbox], input[type=radio], [role=checkbox], [role=radio], [aria-checked], [class*='Checkbox'], [class*='checkbox'], [class*='Radio'], [class*='radio']");
     if (marker) return marker.closest?.("input, label, button, [role=checkbox], [role=radio], [class*='icon'], [class*='Icon']") || marker;
     return option;
