@@ -2,15 +2,19 @@ chrome.action.onClicked.addListener(async (tab) => {
   if (tab.id != null) await chrome.sidePanel.open({ tabId: tab.id });
 });
 
-const trustedClick = async (tabId, x, y) => {
+const trustedClick = async (tabId, x, y, plain = false) => {
   const debuggee = { tabId };
   let attached = false;
   try {
     await chrome.debugger.attach(debuggee, "1.3");
     attached = true;
-    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0, pointerType: "mouse" });
-    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1, pointerType: "mouse" });
-    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1, pointerType: "mouse" });
+    if (!plain) await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0, pointerType: "mouse" });
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", plain
+      ? { type: "mousePressed", x, y, button: "left", clickCount: 1 }
+      : { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1, pointerType: "mouse" });
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", plain
+      ? { type: "mouseReleased", x, y, button: "left", clickCount: 1 }
+      : { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1, pointerType: "mouse" });
     return { clicked: true };
   } catch {
     return { clicked: false };
@@ -21,8 +25,8 @@ const trustedClick = async (tabId, x, y) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== "RESUME_AUTOFILL_TRUSTED_CLICK" || sender.id !== chrome.runtime.id || sender.tab?.id == null) return;
-  const { x, y } = message;
+  const { x, y, plain } = message;
   if (!Number.isFinite(x) || !Number.isFinite(y)) { sendResponse({ clicked: false }); return; }
-  trustedClick(sender.tab.id, x, y).then(sendResponse);
+  trustedClick(sender.tab.id, x, y, plain === true).then(sendResponse);
   return true;
 });

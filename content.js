@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_PROTOCOL = 61;
+  const CONTENT_PROTOCOL = 74;
   if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -553,8 +553,9 @@
     const event = new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true });
     [control, document.activeElement, document, window].filter(Boolean).forEach((node) => node.dispatchEvent?.(event));
     await wait(60);
-    // Custom portals may not expose a stable class/role; always give their outside-click handlers a chance.
-    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => document.body.dispatchEvent(new MouseEvent(type, { bubbles: true })));
+    // Phoenix multi-selects tear down their virtual list on Escape; an extra
+    // synthetic outside click races that teardown and corrupts its state.
+    if (!control?.closest?.(".phoenix-select--multi")) ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => document.body.dispatchEvent(new MouseEvent(type, { bubbles: true })));
     await wait(60);
     const ownPopupOpen = popupFor(control, false).length > 0;
     if (toggle && ownPopupOpen && control?.click) { control.click(); await wait(60); }
@@ -594,7 +595,7 @@
       return true;
     });
   };
-  const popupOptionDetails = async (popup) => {
+  const popupOptionDetails = async (popup, scan = true) => {
     const texts = () => popupOptionNodes(popup)
       .map((node) => clean(node.textContent || node.getAttribute("data-value") || node.getAttribute("value")))
       .filter((text) => text && !/^请选择$|^暂无选项$/.test(text));
@@ -605,7 +606,7 @@
     const scroller = [...(popup?.querySelectorAll("*") || [])]
       .filter((el) => el.clientHeight >= 40 && el.scrollHeight > el.clientHeight + 2)
       .sort((a, b) => b.clientHeight - a.clientHeight)[0];
-    if (scroller) {
+    if (scan && scroller) {
       const originalTop = scroller.scrollTop;
       // ponytail: cap portal scans; raise only for controls with over 80 meaningful choices.
       for (let pass = 0; pass < 12; pass++) {
@@ -659,7 +660,8 @@
         const distance = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - rect.left) + Math.abs(r.top - rect.top); };
         return distance(a) - distance(b);
       })[0]);
-      let popupDetails = await popupOptionDetails(selectedPopup);
+      const scanPopup = !control.closest?.(".phoenix-select--multi");
+      let popupDetails = await popupOptionDetails(selectedPopup, scanPopup);
       if (keepOpen && selectedPopup) {
         const previous = new Set(previousOptions?.[descriptor.key] || []);
         const before = new Set(popupDetails.texts);
@@ -672,14 +674,15 @@
           return text && !before.has(text);
           });
         }, 1600);
-        popupDetails = await popupOptionDetails(selectedPopup);
+        popupDetails = await popupOptionDetails(selectedPopup, scanPopup);
       }
       descriptor.options = [...new Set([...known, ...popupDetails.texts])].slice(0, 80);
       descriptor.optionSource = selectedPopup ? "popup" : "popup-not-found";
       descriptor.optionCount = descriptor.options.length;
       descriptor.hasSearch = popupDetails.hasSearch;
       descriptor.hasConfirmation = !!confirmationFor(selectedPopup, control);
-      descriptor.isMultiSelector = /(?:已选(?:地区)?\s*\d+\s*\/|清空已选)/.test(clean(selectedPopup?.innerText || selectedPopup?.textContent));
+      descriptor.isMultiSelector = /(?:已选(?:地区)?\s*\d+\s*\/|清空已选)/.test(clean(selectedPopup?.innerText || selectedPopup?.textContent))
+        || !!control.closest?.(".phoenix-select--multi, [class*='select--multi'], [class*='Select--multi']");
       descriptor.scrolled = popupDetails.scrolled;
       if (!keepOpen) { await closeVisibleDropdowns(control); lastOpenedControl = null; }
     }
@@ -701,13 +704,13 @@
     const marker = text.search(/\s+(?=(?:负责|实现|构建|设计|开发|使用|参与|主导))/);
     return marker > 0 ? { summary: text.slice(0, marker).trim(), responsibilities: text.slice(marker).trim() } : { summary: text, responsibilities: "" };
   };
-  const clickOption = async (el, trusted = false, changed, record) => {
+  const clickOption = async (el, trusted = false, changed, record, plainTrusted = false) => {
     if (!el) return false;
     if (trusted && globalThis.chrome?.runtime?.sendMessage) {
       const rect = el.getBoundingClientRect();
       if (record) record.rect = { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
       try {
-        const result = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_TRUSTED_CLICK", x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        const result = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_TRUSTED_CLICK", x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, plain: plainTrusted });
         if (record) record.trusted = result?.clicked === true;
         if (result?.clicked && (!changed || await waitFor(changed, 150))) return true;
       } catch (error) { if (record) record.trustedError = String(error?.message || error); }
@@ -730,10 +733,25 @@
     const areaItem = option?.closest?.("[class*='area-item-container'], [class*='Area-item-container']");
     if (areaItem) return areaItem.querySelector("[class*='icon-container'], [class*='Icon-container']") || areaItem;
     const listItem = option?.closest?.("[class*='list-item-container'], [class*='List-item-container']");
-    if (listItem) return listItem;
+    // Phoenix's two-column rows bind selection to the checkbox icon; other
+    // list rows keep their full-row target.
+    if (listItem) return /(?:^|\s)list-item-container-two(?:\s|$)/.test(String(listItem.className || ""))
+      ? listItem.querySelector("[class*='icon-container'], [class*='Icon-container']") || listItem
+      : listItem;
     const marker = option?.querySelector?.("input[type=checkbox], input[type=radio], [role=checkbox], [role=radio], [aria-checked], [class*='Checkbox'], [class*='checkbox'], [class*='Radio'], [class*='radio']");
     if (marker) return marker.closest?.("input, label, button, [role=checkbox], [role=radio], [class*='icon'], [class*='Icon']") || marker;
     return option;
+  };
+  const selectionTargets = (option) => {
+    const listItem = option?.closest?.("[class*='list-item-container'], [class*='List-item-container']");
+    if (listItem && /(?:^|\s)list-item-container-two(?:\s|$)/.test(String(listItem.className || ""))) {
+      return [...new Set([
+        listItem.querySelector("[class*='icon-container'], [class*='Icon-container']"),
+        listItem.querySelector("[class*='item-text-label'], [class*='Item-text-label']"),
+        listItem
+      ].filter(Boolean))];
+    }
+    return [selectionTarget(option)];
   };
   const choiceState = (control, popup, target) => {
     const root = choiceRoot(control);
@@ -752,8 +770,11 @@
   })}`);
   const confirmationButton = (scope) => {
     const nodes = [...(scope?.querySelectorAll("button, [role=button], [data-confirm], [class*='button'], [class*='Button'], [class*='btn'], [class*='Btn']") || [])];
-    return nodes.find((el) => visible(el) && normalize(el.textContent) === "确定")
+    const leaf = nodes.find((el) => visible(el) && normalize(el.textContent) === "确定" && ![...el.children].some((child) => visible(child) && normalize(child.textContent) === "确定"))
       || [...(scope?.querySelectorAll("*") || [])].find((el) => visible(el) && normalize(el.textContent) === "确定" && ![...el.children].some((child) => visible(child) && normalize(child.textContent) === "确定"));
+    // Phoenix rerenders its footer after a multi-value click. Its handler is
+    // on the button root rather than its transient text/container node.
+    return leaf?.closest?.(".phoenix-button") || leaf || null;
   };
   const confirmationFor = (popup, control) => {
     const scopes = []; const seen = new Set();
@@ -1404,27 +1425,34 @@
     trace.option = clean(option.textContent || option.getAttribute("data-value") || option.getAttribute("value"));
     trace.selectedValue = trace.option;
     trace.commit = "option-click";
-    const commitTarget = selectionTarget(option);
+    const commitTargets = selectionTargets(option);
+    const commitTarget = commitTargets[0];
     trace.commitTarget = { tag: commitTarget?.tagName || "", className: String(commitTarget?.className || ""), text: clean(commitTarget?.textContent) };
+    trace.commitTargets = commitTargets.map((node) => ({ tag: node?.tagName || "", className: String(node?.className || ""), text: clean(node?.textContent) }));
     trace.beforeClickState = choiceState(control, popup, commitTarget);
     logChoice("before-click", trace, trace.beforeClickState);
-    const observeClick = (event) => { if (event.target === commitTarget || commitTarget?.contains?.(event.target)) trace.clickObserved = true; };
+    const observeClick = (event) => { if (commitTargets.some((node) => event.target === node || node?.contains?.(event.target))) trace.clickObserved = true; };
     document.addEventListener("click", observeClick, true);
     const selectedCount = () => [...new Set([popup, ...popupFor(control)])]
       .filter((candidate) => candidate?.isConnected && visible(candidate))
       .map((candidate) => clean(candidate.innerText || candidate.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "")
       .sort((left, right) => Number(right.match(/\d+/)?.[0] || 0) - Number(left.match(/\d+/)?.[0] || 0))[0] || "";
     const selectedBeforeClick = selectedCount();
-    const multiSelector = !!selectedBeforeClick;
+    const multiSelector = !!selectedBeforeClick || !!control.closest?.(".phoenix-select--multi, [class*='select--multi'], [class*='Select--multi']");
+    const optionChecked = () => !!option.querySelector?.("[aria-checked=true], input:checked, [class*='CheckboxChecked'], [class*='checkbox-checked']");
+    const checkedBeforeClick = optionChecked();
     const selectionChanged = () => {
       const selected = selectedCount();
-      return selected && selected !== selectedBeforeClick;
+      return selected && selected !== selectedBeforeClick || optionChecked() !== checkedBeforeClick;
     };
-    await clickOption(commitTarget, multiSelector, multiSelector ? selectionChanged : null);
-    document.removeEventListener("click", observeClick, true);
-    if (multiSelector) {
+    for (const target of multiSelector ? commitTargets : [commitTarget]) {
+      await clickOption(target, multiSelector, multiSelector ? selectionChanged : null);
+      if (!multiSelector) break;
       trace.selectionObserved = !!await waitFor(selectionChanged, 800);
-    } else await wait(80);
+      if (trace.selectionObserved) break;
+    }
+    document.removeEventListener("click", observeClick, true);
+    if (!multiSelector) await wait(80);
     trace.afterClick = readControl();
     trace.afterClickState = choiceState(control, popup, commitTarget);
     logChoice("after-click", trace, trace.afterClickState);
@@ -1440,6 +1468,13 @@
         return false;
       }
     }
+    // Re-read a live footer after the option click; multi-selects can remount it.
+    if (multiSelector) await wait(100);
+    const phoenixSelectionCart = multiSelector && popup?.querySelector?.(".constant-main-selector-container");
+    if (phoenixSelectionCart) {
+      trace.selectionCartReady = !!await waitFor(() => [...popup.querySelectorAll(".right-container .select-text-label")]
+        .some((node) => matches(node.textContent || "")), 1500);
+    }
     const confirm = multiSelector
       ? await waitFor(() => confirmationFor(popup, control), 800)
       : confirmationFor(popup, control);
@@ -1451,13 +1486,19 @@
     }
     if (confirm) {
       trace.confirmAttempted = true;
-      await clickOption(confirm, multiSelector);
+      trace.confirmTarget = { tag: confirm.tagName || "", className: String(confirm.className || ""), connected: !!confirm.isConnected };
+      trace.confirmClick = {};
+      const phoenixIndustry = phoenixSelectionCart && /期望从事行业/.test(label);
+      trace.confirmMode = phoenixIndustry ? "plain-trusted-after-cart" : phoenixSelectionCart ? "trusted-after-cart" : "trusted";
+      await clickOption(confirm, multiSelector, multiSelector ? () => !visible(popup) : null, trace.confirmClick, phoenixIndustry);
       if (multiSelector) await waitFor(() => !visible(popup), 800);
       else await wait(120);
     }
     trace.confirmFound = !!confirm;
     const committedControl = control.isConnected ? control : controlBox?.querySelector(controlSelector);
-    if (committedControl && committedControl.tagName !== "SELECT" && isChoiceControl(committedControl)) {
+    // A Phoenix multi-select keeps an empty search input beside its tags.
+    // Dispatching change on that input after confirm clears the just-selected value.
+    if (!multiSelector && committedControl && committedControl.tagName !== "SELECT" && isChoiceControl(committedControl)) {
       committedControl.dispatchEvent(new Event("input", { bubbles: true }));
       committedControl.dispatchEvent(new Event("change", { bubbles: true }));
       committedControl.dispatchEvent(new Event("blur", { bubbles: true }));
@@ -1466,13 +1507,15 @@
     // displayed value before closing the popup, rather than cancelling it early.
     const autocomplete = isAutocompleteControl(control);
     const expectedDisplay = year && month && pairIndex < 0 ? value : trace.selectedValue || value;
-    const multiCommitted = multiSelector && trace.selectionObserved && !visible(popup);
-    trace.confirmed = multiCommitted || !!await waitFor(() => valueMatches(readControl(), expectedDisplay, label)
+    trace.confirmed = !!await waitFor(() => valueMatches(readControl(), expectedDisplay, label)
       && (!autocomplete || !popup?.isConnected || !visible(popup)), 800);
     trace.afterConfirm = readControl();
     if (!trace.confirmed) {
       trace.failure = autocomplete && valueMatches(readControl(), expectedDisplay, label) ? "popup-still-open" : "display-not-confirmed";
-      restoreChoiceSearch(control, trace.before);
+      // Phoenix multi-selects commit through their empty control input.
+      // Restoring that input after the footer click clears its pending tags.
+      if (!multiSelector) restoreChoiceSearch(control, trace.before);
+      else trace.restoreSkipped = "multi-selector";
     }
     trace.afterConfirmState = choiceState(committedControl || control, popup, commitTarget);
     logChoice("confirmed", trace, trace.afterConfirmState);

@@ -18,3 +18,6 @@ Thumbs.db
 
 # Unreferenced local test capture
 tests/component-stuck.png
+
+# Local debugging notes; never commit incident records from a user's form session.
+.local-notes/

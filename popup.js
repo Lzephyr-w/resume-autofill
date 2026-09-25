@@ -358,7 +358,7 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
-const CONTENT_MESSAGE_SUFFIX = "_V61";
+const CONTENT_MESSAGE_SUFFIX = "_V74";
 const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
 const injectCurrentContent = (tabId) => {
   if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");
@@ -467,8 +467,7 @@ const localCandidate = (field, profile) => {
   }) : [];
   return matches.length === 1 ? matches[0] : uniqueAnchorOption(value, options);
 };
-const isMultiIndustryField = (field) => !!field?.isMultiSelector && /行业/.test(fieldLabel(field));
-const isCascadeField = (field) => !!field && (!field.isMultiSelector || isMultiIndustryField(field)) && field.optionSource !== "native"
+const isCascadeField = (field) => !!field && !field.isMultiSelector && field.optionSource !== "native"
   && (!!field.hasConfirmation || /城市|地点|地区|所在地|家乡|籍贯|户籍|户口|居住|行业|职业|职位|岗位/.test(fieldLabel(field)));
 const committedCascadeCandidate = (value, source) => {
   const candidate = choiceToken(value); const wanted = choiceToken(source);
@@ -494,12 +493,12 @@ const cascadeCandidateAssignments = (fields, profile) => fields.flatMap((field) 
 // locations by city name (for example, 优博讯's 工作地点 picker).
 const searchableCascadeAssignments = (fields, profile, occupied = new Set()) => fields.flatMap((field) => {
   const value = aiFieldContext(field, profile).sourceValue;
-  return (field?.hasSearch || isLocationField(field)) && (!field.isMultiSelector || isMultiIndustryField(field)) && !occupied.has(field.key) && /行业|职业|职位|岗位|城市|地点|地区|所在地/.test(fieldLabel(field)) && value
+  return (field?.hasSearch || isLocationField(field)) && !field.isMultiSelector && !occupied.has(field.key) && /行业|职业|职位|岗位|城市|地点|地区|所在地/.test(fieldLabel(field)) && value
     ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1, sourceValue: value, locationHint: isLocationField(field) ? locationSearchHint(field, profile) : "", searchFallback: true, directLocationSearch: isLocationField(field) }] : [];
 });
 const searchableSelectorAssignments = (fields, profile, occupied = new Set()) => fields.flatMap((field) => {
   const value = localCandidate(field, profile) || aiFieldContext(field, profile).sourceValue;
-  return field?.isMultiSelector && !isCascadeField(field) && field.hasSearch && !occupied.has(field.key) && /城市|地点|地区|所在地|行业|职业|职位|岗位/.test(fieldLabel(field)) && value
+  return field?.isMultiSelector && !isCascadeField(field) && !occupied.has(field.key) && /城市|地点|地区|所在地|行业|职业|职位|岗位/.test(fieldLabel(field)) && value
     ? [{ key: field.key, index: field.index, label: field.label, value, confidence: 1, sourceValue: value, local: true }] : [];
 });
 const cascadeChildOptions = (options, parentOptions) => (options || []).filter((option) => !parentOptions.has(choiceToken(option)));
@@ -731,7 +730,7 @@ $("ai").addEventListener("click", async () => {
     const awardText = structuralAward ? `；第2条获奖时间：${awardSource}，${reasonText[structuralAward.reason] || structuralAward.reason}${awardChoice}${awardTarget}` : "";
     const diagnosticText = failed.length ? `；AI诊断：${failed.map((item) => {
       const area = item.choice?.area;
-      const choice = item.reason === "page-option-or-validation-failed" && item.choice ? (area ? `（地区协议 V${area.protocol || "?"}，值“${area.source || "空"}”，提示“${area.hint || area.companyHint || "空"}”，搜索“${area.search || area.city || "空"}”，弹层${area.popupFound ? "有" : "无"}，搜索框${area.searchFound ? "有" : "无"}，候选 ${area.candidates?.length || 0} 个${item.choice.optionFound ? `，匹配“${item.choice.option || ""}”，点击${item.choice.selectionAttempts?.length || 0}处（原生${item.choice.selectionAttempts?.some((attempt) => attempt.trusted) ? "已发送" : "未发送"}），已选${item.choice.selectionObserved ? "是" : "否"}，确认${item.choice.confirmFound ? "有" : "无"}` : "，未匹配"}，确认后“${item.choice.afterConfirm || "空"}”）` : item.choice.optionFound ? `（候选“${item.choice.option || ""}”，点击后“${item.choice.afterClick || "空"}”，确认后“${item.choice.afterConfirm || "空"}”${item.choice.confirmFound ? "，已找到确认" : "，无确认"}）` : "（未找到页面候选）")
+      const choice = item.reason === "page-option-or-validation-failed" && item.choice ? (area ? `（地区协议 V${area.protocol || "?"}，值“${area.source || "空"}”，提示“${area.hint || area.companyHint || "空"}”，搜索“${area.search || area.city || "空"}”，弹层${area.popupFound ? "有" : "无"}，搜索框${area.searchFound ? "有" : "无"}，候选 ${area.candidates?.length || 0} 个${item.choice.optionFound ? `，匹配“${item.choice.option || ""}”，点击${item.choice.selectionAttempts?.length || 0}处（原生${item.choice.selectionAttempts?.some((attempt) => attempt.trusted) ? "已发送" : "未发送"}），已选${item.choice.selectionObserved ? "是" : "否"}，确认${item.choice.confirmFound ? "有" : "无"}` : "，未匹配"}，确认后“${item.choice.afterConfirm || "空"}”）` : item.choice.optionFound ? `（候选“${item.choice.option || ""}”，点击后“${item.choice.afterClick || "空"}”，确认后“${item.choice.afterConfirm || "空"}”${item.choice.confirmFound ? `，确认目标“${item.choice.confirmTarget?.className || item.choice.confirmTarget?.tag || "未知"}”${item.choice.confirmClick?.trusted ? "（原生已发送）" : "（原生未发送）"}` : "，无确认"}）` : "（未找到页面候选）")
         : "";
       const detail = choice ? "" : item.reason === "low-confidence" && Number.isFinite(Number(item.confidence)) ? `（置信度 ${Number(item.confidence).toFixed(2)}，候选 ${item.optionCount || 0} 个）`
         : ["ai-no-assignment", "not-a-page-option", "candidate-not-read", "options-unavailable"].includes(item.reason) ? `（候选 ${item.optionCount || 0} 个${item.optionSource ? `，${item.optionSource}` : ""}）` : "";
