@@ -358,7 +358,7 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
-const CONTENT_MESSAGE_SUFFIX = "_V59";
+const CONTENT_MESSAGE_SUFFIX = "_V60";
 const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
 const injectCurrentContent = (tabId) => {
   if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");
@@ -405,12 +405,13 @@ function aiFieldContext(field, profile) {
       : /居住|所在(?:地|地点|地区)?/.test(label) ? profile?.currentResidence : "";
   const rows = /实习/.test(module) ? (profile?.internships?.length ? profile.internships : all) : /工作/.test(module) ? (profile?.work?.length ? profile.work : all) : /工作地点|月薪|职位名称|所在部门|工作性质/.test(label) ? all : [];
   const educationType = /学历类型|受教育类型|培养方式|学习方式|就读方式/.test(label) ? profile?.education?.[index]?.training : "";
+  const languageProficiency = /语言/.test(module) && /掌握程度|熟练程度|精通程度|语言水平/.test(label) ? profile?.languages?.[index]?.proficiency : "";
   const intentField = /求职意向|期望|现月薪|工作城市|行业|职业|到岗/.test(`${module} ${label}`);
   const sourceValue = /期望从事行业|期望行业|意向行业/.test(label) ? profile?.jobIntent?.industry
     : /期望从事职业|期望职业|意向职位/.test(label) ? profile?.jobIntent?.occupation
       : /期望月薪|期望薪资|期望待遇/.test(label) ? profile?.jobIntent?.expectedSalary
         : /期望工作城市|期望城市|意向城市|期望工作地点|期望地点/.test(label) ? profile?.jobIntent?.city
-          : /工作地点|办公地点|工作地区|办公城市|任职地点/.test(label) ? rows[index]?.location : educationType || personalSource;
+          : /工作地点|办公地点|工作地区|办公城市|任职地点/.test(label) ? rows[index]?.location : educationType || languageProficiency || personalSource;
   const locationCandidates = personalLocation ? [
     ["nativePlace", "籍贯", profile?.nativePlace], ["currentResidence", "现居住地", profile?.currentResidence], ["householdRegistration", "户口所在地", profile?.householdRegistration]
   ].filter(([, , value]) => String(value || "").trim()).map(([key, label, value]) => ({ key, label, value: String(value).trim() })) : [];
@@ -438,6 +439,11 @@ const salaryRange = (value) => {
   const amounts = [...String(value || "").toLowerCase().matchAll(/(\d+(?:\.\d+)?)\s*(万|w|k|千)?/g)].map(([, number, unit]) => Number(number) * (/万|w/.test(unit) ? 10000 : /k|千/.test(unit) ? 1000 : 1));
   return amounts.length ? [Math.min(...amounts), Math.max(...amounts)] : null;
 };
+const languageProficiencyCandidate = (value, options) => {
+  const levels = ["", "入门", "日常会话", "商务会话", "无障碍沟通", "母语"];
+  const level = /精通|专家|高级/.test(String(value)) ? 4 : /熟练|熟悉|掌握/.test(String(value)) ? 3 : /一般|中等|中级/.test(String(value)) ? 2 : /了解|入门|初级/.test(String(value)) ? 1 : 0;
+  return level && options.filter((option) => levels.includes(String(option).trim())).length >= 3 ? options.find((option) => String(option).trim() === levels[level]) || "" : "";
+};
 const localCandidate = (field, profile) => {
   const value = aiFieldContext(field, profile).sourceValue;
   const options = field.options || [];
@@ -445,6 +451,8 @@ const localCandidate = (field, profile) => {
   if (!wanted) return "";
   const exact = options.find((option) => choiceToken(option) === wanted);
   if (exact) return exact;
+  const language = languageProficiencyCandidate(value, options);
+  if (language) return language;
   if (/薪|工资|待遇/.test(fieldLabel(field))) {
     const range = salaryRange(value);
     const matches = range && range[0] === range[1] ? options.filter((option) => {

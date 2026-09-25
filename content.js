@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_PROTOCOL = 59;
+  const CONTENT_PROTOCOL = 60;
   if ((globalThis.__resumeAutofillContentProtocol || 0) >= CONTENT_PROTOCOL) return;
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -51,8 +51,12 @@
     return 0;
   };
   const proficiencyOption = (value, candidates, label) => {
-    if (!/掌握程度|熟练程度|技能等级|语言水平|听说|读写/.test(label)) return null;
+    if (!/掌握程度|熟练程度|精通程度|技能等级|语言水平|听说|读写/.test(label)) return null;
     const level = proficiencyLevel(value);
+    const languageLevels = ["", "入门", "日常会话", "商务会话", "无障碍沟通", "母语"];
+    const languageOptions = candidates.filter((candidate) => languageLevels.includes(clean(candidate.textContent || candidate)));
+    const language = level && languageOptions.length >= 3 && languageOptions.find((candidate) => clean(candidate.textContent || candidate) === languageLevels[level]);
+    if (language) return language;
     const matches = level && candidates.filter((candidate) => proficiencyLevel(candidate.textContent || candidate) === level);
     return matches?.length === 1 ? matches[0] : null;
   };
@@ -376,7 +380,7 @@
     "实习经历": ["实习经验", "实习经历"],
     "证书": ["证书", "资格证书", "证书信息"],
     "语言类型": ["语言", "语言类型", "语种"],
-    "掌握程度": ["掌握程度", "熟练程度", "语言水平", "技能等级"],
+    "掌握程度": ["掌握程度", "熟练程度", "精通程度", "语言水平", "技能等级"],
     "听说": ["听说", "听力口语", "听力", "口语"],
     "读写": ["读写", "阅读写作", "阅读", "写作"],
     "获奖时间": ["获奖日期", "获得时间", "奖项时间", "获奖时间"],
@@ -1169,8 +1173,9 @@
     const search = [popup?.querySelector("input:not([type=hidden])"), target].find((el) => el?.tagName === "INPUT" && !el.readOnly);
     // A salary search box filters by displayed range text; searching a raw
     // number such as 3500 hides “2001 ~ 4000”. Match ranges from real options.
-    const proficiencySearch = /掌握程度|熟练程度|技能等级|语言水平|听说|读写/.test(label)
-      ? ["", "了解", "一般", "熟练", "精通"][proficiencyLevel(value)] : "";
+    const matchedProficiency = proficiencyOption(value, options(), label);
+    const proficiencySearch = matchedProficiency ? clean(matchedProficiency.textContent || matchedProficiency.getAttribute("data-value") || matchedProficiency.getAttribute("value"))
+      : /掌握程度|熟练程度|精通程度|技能等级|语言水平|听说|读写/.test(label) ? ["", "了解", "一般", "熟练", "精通"][proficiencyLevel(value)] : "";
     if (search && !isLocationPicker && !/薪|工资|待遇/.test(label) && !options().some((el) => matches(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")))) {
       // Autocomplete controls need the desired text before their real options exist.
       setSearchValue(search, proficiencySearch || value);

@@ -66,7 +66,7 @@
       : kind === "project" ? input("项目名称", `${kind}Name${index}`) + input("职务", `${kind}Role${index}`) + month("开始时间", `${kind}Start${index}`) + month("结束时间", `${kind}End${index}`) + item("项目描述", `<textarea id="${kind}Description${index}"></textarea>`)
       : kind === "cadre" ? dateRange("起止时间", kind, index) + input("职务", `${kind}Position${index}`) + item("工作职责", `<textarea id="${kind}Duty${index}"></textarea>`)
       : kind === "skill" ? input("技能名称", `${kind}Name${index}`) + select("掌握程度", `${kind}Proficiency${index}`, ["了解", "一般", "熟练", "精通"], "", component) + input("使用时间总计", `${kind}Duration${index}`) + item("技能描述", `<textarea id="${kind}Description${index}"></textarea>`)
-      : kind === "language" ? input("语言类型", `${kind}Type${index}`) + select("掌握程度", `${kind}Proficiency${index}`, ["一般", "良好", "熟练", "精通"], "", component) + select("听说", `${kind}Speaking${index}`, ["一般", "良好", "熟练", "精通"], "", component) + select("读写", `${kind}Reading${index}`, ["一般", "良好", "熟练", "精通"], "", component)
+      : kind === "language" ? input("语言类型", `${kind}Type${index}`) + select("精通程度", `${kind}Proficiency${index}`, ["入门", "日常会话", "商务会话", "无障碍沟通", "母语"], "", component) + select("听说", `${kind}Speaking${index}`, ["一般", "良好", "熟练", "精通"], "", component) + select("读写", `${kind}Reading${index}`, ["一般", "良好", "熟练", "精通"], "", component)
       : kind === "certificate" ? input("证书名称", `${kind}Name${index}`) + input("成绩", `${kind}Score${index}`)
       : yearMonth("获奖时间", kind, index) + input("获奖项", `${kind}Name${index}`)
     )}</div>`;
@@ -343,7 +343,7 @@
         projects: [{ name: "项目一", role: "开发", start: "2024-01", end: "2024-02", description: "项目摘要" }, { name: "非急救转运调度平台", role: "负责人", start: "2024-03", end: "2024-04", description: "项目说明" }, { name: "小A招新小程序", role: "开发", start: "2024-05", end: "2024-06", description: "项目说明" }],
         cadres: [{ position: "班长", duty: "组织活动", start: "2020-09", end: "2022-06" }, { position: "部长", duty: "统筹工作", start: "2022-09", end: "2024-06" }],
         skills: [{ name: "Vue3", proficiency: "熟悉", duration: "3年", description: "用于管理后台开发" }, { name: "React", proficiency: "熟练", duration: "2年", description: "用于组件化开发" }],
-        languages: [{ language: "英语", proficiency: "熟悉", speaking: "熟悉", reading: "熟悉" }, { language: "日语", proficiency: "一般", speaking: "一般", reading: "一般" }],
+        languages: [{ language: "英语", proficiency: "熟练", speaking: "熟悉", reading: "熟悉" }, { language: "日语", proficiency: "一般", speaking: "一般", reading: "一般" }],
         certificates: [{ name: "CET-4", score: "520" }, { name: "CET-6", score: "510" }],
         awards: [{ name: "一等奖", date: "2025-04" }, { name: "二等奖", date: "2025-06" }, { name: "三等奖", date: "2024" }], customFields: {}, extras: { selfEvaluation: "独立自我描述" }
       };
@@ -426,7 +426,7 @@
         ["干部模块与日期不串填", document.querySelectorAll("#cadreRows .repeat-row").length === 2 && text("cadrePosition2") === "部长" && text("cadreStartYear1") === "2020" && text("cadreStartMonth1") === "9" && text("cadreEndYear2") === "2024" && text("cadreEndMonth2") === "6" && text("workTitle1") === (profile.work[0] || profile.experiences[0]).title],
         ["技能扩行", document.querySelectorAll("#skillRows .repeat-row").length === 2 && text("skillName1") === "Vue3" && text("skillName2") === "React" && text("skillDescription2") === "用于组件化开发"],
         ["技能等级候选映射", text("skillProficiency1") === "熟练" && text("skillProficiency2") === "熟练"],
-        ["语言候选与扩行", document.querySelectorAll("#languageRows .repeat-row").length === 2 && text("languageType2") === "日语" && text("languageProficiency1") === "熟练" && text("languageSpeaking1") === "熟练" && text("languageReading1") === "熟练" && text("languageReading2") === "一般"],
+        ["语言候选与扩行", document.querySelectorAll("#languageRows .repeat-row").length === 2 && text("languageType2") === "日语" && text("languageProficiency1") === "商务会话" && text("languageSpeaking1") === "熟练" && text("languageReading1") === "熟练" && text("languageReading2") === "一般"],
         ["证书扩行", document.querySelectorAll("#certificateRows .repeat-row").length === 2 && text("certificateName2") === "CET-6"],
         ["重复字段第二条日期", document.querySelectorAll("#awardRows .repeat-row").length === 3 && text("awardName2") === "二等奖" && text("awardYear1") === "2025" && text("awardMonth1") === "4" && text("awardYear2") === "2025" && text("awardMonth2") === "6" && text("awardName3") === "三等奖" && text("awardYear3") === "2024" && text("awardMonth3") === "" && document.querySelectorAll("#workRows .repeat-row").length === 2],
         ["自我描述", text("selfEvaluation") === profile.extras.selfEvaluation]
