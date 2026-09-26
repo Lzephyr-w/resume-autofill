@@ -65,6 +65,8 @@ function cleanProfile(input) {
   ["name", "phone", "email", "gender", "birthDate", "age", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience"].forEach((key) => {
     if (p[key] != null) base[key] = String(p[key]).trim();
   });
+  const monthOnlyBirth = base.birthDate.match(/^(\d{4})\s*(?:年|[./-])\s*(\d{1,2})(?:月)?$/);
+  if (monthOnlyBirth && Number(monthOnlyBirth[2]) >= 1 && Number(monthOnlyBirth[2]) <= 12) base.birthDate = `${monthOnlyBirth[1]}-${monthOnlyBirth[2].padStart(2, "0")}-01`;
   const legacyIntentKeys = {
     industry: ["intentIndustry", "expectedIndustry", "期望从事行业"], occupation: ["intentOccupation", "expectedOccupation", "期望从事职业"],
     currentSalary: ["intentCurrentSalary", "currentSalary", "现月薪(税前)"], expectedSalary: ["intentExpectedSalary", "expectedSalary", "期望月薪(税前)"],
@@ -358,7 +360,7 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
-const CONTENT_MESSAGE_SUFFIX = "_V74";
+const CONTENT_MESSAGE_SUFFIX = "_V95";
 const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
 const injectCurrentContent = (tabId) => {
   if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");

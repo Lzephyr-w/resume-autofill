@@ -27,7 +27,9 @@
     const component = ui === "component" || cascade || moka;
     const misleading = ui === "phoenix-misleading";
     const yearTitlePhoenix = ui === "phoenix-year-title";
-    const phoenix = ui === "phoenix" || ui === "phoenix-anchor" || misleading || yearTitlePhoenix;
+    const fullDatePhoenix = ui === "phoenix-full-date";
+    const rerenderPhoenix = ui === "phoenix-rerender";
+    const phoenix = ui === "phoenix" || ui === "phoenix-anchor" || fullDatePhoenix || rerenderPhoenix || misleading || yearTitlePhoenix;
     const item = (label, control) => component
       ? `<div class="ant-form-item"><div class="ant-form-item-label"><label>${label}</label></div><div class="ant-form-item-control">${control}</div></div>`
       : phoenix ? `<div class="form-item"><div class="form-item__label">${label}</div><div class="form-item__control">${control}</div></div>`
@@ -61,13 +63,13 @@
     // becoming siblings; keep this regression fixture deeper than 8 levels.
     const nestPhoenix = (body) => phoenix ? `${'<div class="deep-row">'.repeat(9)}${body}${'</div>'.repeat(9)}` : body;
     const row = (kind, index) => `<div class="repeat-row" data-kind="${kind}">${nestPhoenix(
-      kind === "education" ? dateRange("就读时间", kind, index) + input("学校名称", `${kind}School${index}`) + input("专业名称", `${kind}Major${index}`) + select("学历", `${kind}Degree${index}`, ["本科", "硕士"])
+      kind === "education" ? dateRange("就读时间", kind, index) + input("学校名称", `${kind}School${index}`) + input("专业名称", `${kind}Major${index}`) + select("学历", `${kind}Degree${index}`, ["本科", "硕士"]) + select("培养方式", `${kind}Training${index}`, ["全日制统招", "非全日制统招", "交换生"]) + select("成绩排名", `${kind}Rank${index}`, ["TOP1", "TOP5%", "TOP10%", "TOP20%", "TOP30%", "其他"])
       : kind === "work" ? (yearTitlePhoenix ? month("开始时间", `${kind}Start${index}`) + month("结束时间", `${kind}End${index}`) : dateRange("起止时间", kind, index)) + select(index === 1 ? "月薪（税前）" : "税前月薪", `${kind}Salary${index}`, ["2001～4000", "8001～10000"], "", component && index === 2) + select(index === 1 ? "工作地点" : "办公地点", `${kind}City${index}`, ["广州", "深圳"]) + input("公司名称", `${kind}Company${index}`) + input("所在部门", `${kind}Department${index}`) + input("职位名称", `${kind}Title${index}`)
-      : kind === "project" ? input("项目名称", `${kind}Name${index}`) + input("职务", `${kind}Role${index}`) + month("开始时间", `${kind}Start${index}`) + month("结束时间", `${kind}End${index}`) + item("项目描述", `<textarea id="${kind}Description${index}"></textarea>`)
+      : kind === "project" ? input("项目名称", `${kind}Name${index}`) + (phoenix ? item("项目职责", `<textarea id="${kind}Role${index}"></textarea>`) : input("职务", `${kind}Role${index}`)) + month("开始时间", `${kind}Start${index}`) + month("结束时间", `${kind}End${index}`) + item("项目描述", `<textarea id="${kind}Description${index}"></textarea>`)
       : kind === "cadre" ? dateRange("起止时间", kind, index) + input("职务", `${kind}Position${index}`) + item("工作职责", `<textarea id="${kind}Duty${index}"></textarea>`)
       : kind === "skill" ? input("技能名称", `${kind}Name${index}`) + select("掌握程度", `${kind}Proficiency${index}`, ["了解", "一般", "熟练", "精通"], "", component) + input("使用时间总计", `${kind}Duration${index}`) + item("技能描述", `<textarea id="${kind}Description${index}"></textarea>`)
       : kind === "language" ? input("语言类型", `${kind}Type${index}`) + select("精通程度", `${kind}Proficiency${index}`, ["入门", "日常会话", "商务会话", "无障碍沟通", "母语"], "", component) + select("听说", `${kind}Speaking${index}`, ["一般", "良好", "熟练", "精通"], "", component) + select("读写", `${kind}Reading${index}`, ["一般", "良好", "熟练", "精通"], "", component)
-      : kind === "certificate" ? input("证书名称", `${kind}Name${index}`) + input("成绩", `${kind}Score${index}`)
+      : kind === "certificate" ? input(phoenix ? "英语证书名称" : "证书名称", `${kind}Name${index}`, phoenix && index === 1 ? "CET-6" : "") + input("成绩", `${kind}Score${index}`, phoenix && index === 1 ? "510" : "")
       : yearMonth("获奖时间", kind, index) + input("获奖项", `${kind}Name${index}`)
     )}</div>`;
     const add = (kind, text) => phoenix ? `<div id="${kind}Rows_addButton" data-add="${kind}">${text}</div>` : `<button type="button" data-add="${kind}">${text}</button>`;
@@ -75,7 +77,7 @@
     const cascadeFixture = `<section><h2>通用级联回归</h2>${item("所在地点", treeLocation())}${item("期望工作城市", cascadeControl("genericIntentCity", "广东省", ["广州市", "深圳市"]))}${item("期望从事行业", cascadeControl("genericIndustry", "信息技术", ["互联网软件服务", "硬件制造"]))}${item("期望从事职业", cascadeControl("genericOccupation", "技术研发", ["Web前端工程师", "Java工程师"]))}${item("歧义职业", cascadeControl("genericAmbiguous", "技术研发", ["前端开发工程师", "前端开发实习生"]))}</section><section><h2>工作经历</h2><div class="repeat-row">${input("公司名称", "genericCompany1")}${item("工作地点", cascadeControl("genericWorkCity1", "广东省", ["广州市", "深圳市"]))}</div><div class="repeat-row">${input("公司名称", "genericCompany2")}${item("工作地点", cascadeControl("genericWorkCity2", "浙江省", ["杭州市", "宁波市"]))}</div></section>`;
     const atsxFixture = `<section><h2>个人信息</h2><label class="form-item">个人证件<div id="id-card-select-component"><div role="combobox" tabindex="0"><span class="atsx-select-selection-selected-value"></span></div><input type="text"></div></label></section>${atsxSection("education", "教育经历", atsxEducationRow())}${atsxSection("internship", "实习经历", "")}${atsxSection("project", "项目经历", atsxRow("project", 0))}${atsxSection("award", "获奖", atsxAwardRow(0))}`;
     document.querySelector("#form").innerHTML = atsx ? atsxFixture : cascade ? cascadeFixture : `
-      <section><h2>个人信息</h2>${input("姓名", "name", "页面已有姓名")}${input("手机号码", "phone")}${input("电子邮箱", "email")}${item("出生日期", '<input id="birthDate" type="date">')}${select("性别", "gender", ["男", "女"])}${select("最高学历", "highestDegree", ["本科", "硕士"])}${radio("政治面貌", "politicalStatus", ["群众", "中共党员"])}${input("籍贯", "nativePlace")}${input("现居住地", "currentResidence")}${input("户口所在地", "householdRegistration")}</section>
+      <section><h2>个人信息</h2>${input("姓名", "name", "页面已有姓名")}${input("手机号码", "phone")}${input("电子邮箱", "email")}${item("出生日期", fullDatePhoenix ? '<input id="birthDate" class="phoenix-date-picker">' : '<input id="birthDate" type="date">')}${select("性别", "gender", ["男", "女"])}${select("最高学历", "highestDegree", ["本科", "硕士"])}${radio("政治面貌", "politicalStatus", ["群众", "中共党员"])}${input("籍贯", "nativePlace")}${input("现居住地", "currentResidence")}${input("户口所在地", "householdRegistration")}</section>
        <section><h2>求职意向</h2>${select("期望行业", "intentIndustry", ["制造业", "互联网/电子商务"], "", component)}${select("意向职位", "intentOccupation", ["前端开发", "产品经理"])}${select("目前月薪（税前）", "intentCurrentSalary", ["页面已有月薪", "7k"], "页面已有月薪")}${select("期望月薪（税前）", "intentExpectedSalary", ["2001～4000", "8001～10000"])}${select("期望工作地点", "intentCity", ["广州", "深圳"])}${component ? item("级联工作地点", '<div class="mock-cascade"><div id="cascadeCity" role="combobox" tabindex="0" aria-expanded="false"><span class="ant-select-selection-item"></span></div><div role="listbox" hidden><div role="option" data-cascade-parent>广东省</div></div><div class="plain-confirm" hidden><span>确定</span></div></div>') + item("可搜索级联地点", '<div class="mock-cascade"><div id="searchCascadeCity" role="combobox" tabindex="0" aria-expanded="false"><span class="ant-select-selection-item"></span></div><div role="listbox" hidden><input class="mock-location-search" placeholder="搜索"><div role="option" data-cascade-parent>广东省</div></div><div class="plain-confirm" hidden><span>确定</span></div></div>') + item("重渲染级联城市", '<div class="mock-cascade mock-rerender"><input id="rerenderCity" role="combobox" tabindex="0" aria-expanded="false"><div role="listbox" hidden><div role="option" data-rerender-parent><span class="mock-selection-icon" data-select-marker><svg class="area-icon-RadioUnchecked"></svg></span><span>广东省</span><span class="mock-arrow"></span></div></div><div class="plain-confirm" hidden><span>确定</span></div></div>') : ""}</section>
        <section><h2>候选歧义回归</h2>${select("候选职业", "ambiguousOccupation", ["前端开发工程师", "前端开发实习生"])}</section>
       ${component ? `<section><h2>字符串字段</h2>${stringInfo("学校名称", "nestedSchool", "请输入就读学校")}${stringInfo("专业名称", "nestedMajor", "请输入专业名称")}${phoenixInput("普通学校名称", "plainPhoenixSchool")}${phoenixInput("普通专业名称", "plainPhoenixMajor")}${mokaAutocomplete("学校名称", "mokaSchool")}${mokaAutocomplete("专业名称", "mokaMajor")}</section>` : ""}
@@ -86,7 +88,8 @@
       <section><h2>${misleading ? "其他模块" : "项目经历"}</h2><div id="projectRows">${row("project", 1)}</div>${add("project", "添加项目经历")}</section>
       <section><h2>技能</h2><div id="skillRows">${row("skill", 1)}</div>${add("skill", "添加技能")}</section>
       <section><h2>语言能力</h2><div id="languageRows">${row("language", 1)}</div><button type="button" data-add="language">添加语言能力</button></section>
-      <section><h2>证书</h2><div id="certificateRows">${row("certificate", 1)}</div><button type="button" data-add="certificate">添加证书</button></section>
+      <section><h2>${phoenix ? "英语能力" : "证书"}</h2><div id="certificateRows">${row("certificate", 1)}</div><button type="button" data-add="certificate">${phoenix ? "添加英语能力" : "添加证书"}</button></section>
+      ${phoenix ? `<section><h2>证书</h2>${input("证书名称", "genericCertificateName1")}${input("证书描述", "genericCertificateDescription1")}</section>` : ""}
        <section><h2>自我描述</h2>${item("自我描述", '<textarea id="selfEvaluation"></textarea>')}</section>`;
      if (!cascade && !atsx) {
       const industryControl = document.querySelector("#intentIndustry");
@@ -106,6 +109,12 @@
       industryControl?.addEventListener("change", updateOccupation);
      }
     document.addEventListener("click", (event) => {
+       const fullDateInput = fullDatePhoenix && event.target.closest("#birthDate");
+       if (fullDateInput && !document.querySelector("[data-full-date-panel]")) document.body.insertAdjacentHTML("beforeend", `<div class="phoenix-calendar-date-panel" role="dialog" data-full-date-panel data-year="2026" data-month="9" style="position:fixed;left:20px;top:20px;background:white"><a class="prev-year phoenix-calendar-prev-year-btn">«</a><a class="prev-month phoenix-calendar-prev-month-btn">‹</a><span class="phoenix-calendar-ym-select"><span class="phoenix-calendar-year-select" data-calendar-year>2026年</span><span class="phoenix-calendar-month-select" data-calendar-month>9月</span></span><a class="next-month phoenix-calendar-next-month-btn">›</a><a class="next-year phoenix-calendar-next-year-btn">»</a><table role="grid"><tbody><tr>${Array.from({ length: 31 }, (_, index) => `<td role="gridcell"><div class="phoenix-calendar-date">${index + 1}</div></td>`).join("")}</tr></tbody></table></div>`);
+       const fullDateNav = event.target.closest("[data-full-date-panel] .prev-year, [data-full-date-panel] .next-year, [data-full-date-panel] .prev-month, [data-full-date-panel] .next-month");
+        if (fullDateNav) { const panel = fullDateNav.closest("[data-full-date-panel]"); const yearStep = fullDateNav.className.includes("year") ? (fullDateNav.className.includes("prev") ? -1 : 1) : 0; const monthStep = fullDateNav.className.includes("month") ? (fullDateNav.className.includes("prev") ? -1 : 1) : 0; panel.dataset.year = String(Number(panel.dataset.year) + yearStep); panel.dataset.month = String(Number(panel.dataset.month) + monthStep); panel.querySelector("[data-calendar-year]").textContent = `${panel.dataset.year}年`; panel.querySelector("[data-calendar-month]").textContent = `${panel.dataset.month}月`; panel.replaceWith(panel.cloneNode(true)); }
+       const fullDateDay = event.target.closest("[data-full-date-panel] [role=gridcell]");
+       if (fullDateDay) { const panel = fullDateDay.closest("[data-full-date-panel]"); const target = document.querySelector("#birthDate"); target.value = `${panel.dataset.year}-${String(panel.dataset.month).padStart(2, "0")}-${String(fullDateDay.textContent).padStart(2, "0")}`; target.dispatchEvent(new Event("change", { bubbles: true })); panel.remove(); }
        const atsxAwardDate = event.target.closest('.atsx-date-picker input[placeholder="YYYY"]');
        if (atsxAwardDate && !document.querySelector(`[data-atsx-award-for="${atsxAwardDate.dataset.cy}"]`)) {
          document.body.insertAdjacentHTML("beforeend", `<div data-atsx-award-for="${atsxAwardDate.dataset.cy}" data-cy="${atsxAwardDate.dataset.cy}Dropdown" class="atsx-date-picker-dropdown"><div data-cy="year">2023-2026</div>${["2023", "2024", "2025", "2026"].map((value) => `<div data-atsx-award-year data-cy="${value}">${value}</div>`).join("")}</div>`);
@@ -148,13 +157,13 @@
         else document.body.insertAdjacentHTML("beforeend", `<div class="phoenix-calendar-month-panel" data-month-panel data-for="${picker.id}" data-year="2026" style="position:fixed;left:20px;top:20px;background:white"><a class="phoenix-calendar-month-panel-prev-year-btn"></a><a class="phoenix-calendar-month-panel-year-select" data-year-title>2026</a><a class="phoenix-calendar-month-panel-next-year-btn"></a><div class="mock-panel-body"><div role="grid">${Array.from({length:12},(_,i)=>`<div role="gridcell" data-month>${i+1}月</div>`).join("")}</div></div></div>`);
       }
       const panelButton = event.target.closest(".phoenix-calendar-month-panel-prev-year-btn, .phoenix-calendar-month-panel-next-year-btn");
-      if (panelButton) { const panel = panelButton.closest("[data-month-panel]"); panel.dataset.year = String(Number(panel.dataset.year) + (panelButton.className.includes("prev") ? -1 : 1)); panel.querySelector(".phoenix-calendar-month-panel-year-select").textContent = panel.dataset.year; }
+       if (panelButton) { const panel = panelButton.closest("[data-month-panel]"); panel.dataset.year = String(Number(panel.dataset.year) + (panelButton.className.includes("prev") ? -1 : 1)); panel.querySelector(".phoenix-calendar-month-panel-year-select").textContent = panel.dataset.year; if (rerenderPhoenix) panel.replaceWith(panel.cloneNode(true)); }
       const yearTitle = yearTitlePhoenix && event.target.closest("[data-year-title]");
       if (yearTitle) document.querySelector("[data-month-panel]").querySelector("[role=grid]").innerHTML = Array.from({length:11},(_,i)=>`<span data-year-option>${2020+i} 年</span>`).join("");
       const yearOption = event.target.closest("[data-year-option]");
       if (yearOption) { const panel = yearOption.closest("[data-month-panel]"); panel.dataset.year = yearOption.textContent.replace(/\D/g, ""); document.querySelector("[data-year-title]").textContent = `${panel.dataset.year} 年`; panel.querySelector("[role=grid]").innerHTML = Array.from({length:12},(_,i)=>`<span data-month>${i+1} 月</span>`).join(""); }
       const monthCell = event.target.closest("[data-month]");
-      if (monthCell) { const panel = monthCell.closest("[data-month-panel]"); const target = document.getElementById(panel.dataset.for); target.value = `${panel.dataset.year}-${String(parseInt(monthCell.textContent, 10)).padStart(2, "0")}`; target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true })); panel.remove(); document.querySelector("[data-month-header]")?.remove(); }
+       if (monthCell) { const panel = monthCell.closest("[data-month-panel]"); let target = document.getElementById(panel.dataset.for); if (rerenderPhoenix) { const replacement = target.cloneNode(true); target.replaceWith(replacement); target = replacement; } target.value = `${panel.dataset.year}-${String(parseInt(monthCell.textContent, 10)).padStart(2, "0")}`; target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true })); panel.remove(); document.querySelector("[data-month-header]")?.remove(); }
       const mokaOption = event.target.closest("[data-moka-option]");
       if (mokaOption) { if (mokaOption.dataset.pointerReady) { const control = document.getElementById(mokaOption.dataset.for); control.value = mokaOption.textContent.trim(); control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } mokaOption.parentElement.remove(); return; }
       const sdOption = event.target.closest("[data-sd-option]");
@@ -195,9 +204,16 @@
     document.querySelector("#form").addEventListener("change", (event) => changed.add(`change:${event.target.id || event.target.name}`));
     globalThis.__RESUME_AUTOFILL_TEST__ = true;
   </script>
-  <script src="../content.js?v=atsx-v11-awards"></script>
+  <script src="../content.js?v=protocol-95-phoenix-current-confirm"></script>
   <script>
     (async () => {
+      if (fullDatePhoenix) {
+        const field = globalThis.__resumeAutofillTest.formSchema().find((item) => item.id === "birthDate");
+        const report = await globalThis.__resumeAutofillTest.applyAssignments([{ key: field.key, index: field.index, label: field.label, value: "2000-01", confidence: 1 }]);
+        const passed = report.filled === 1 && document.querySelector("#birthDate").value === "2000-01-01";
+        const output = document.querySelector("#result"); output.className = passed ? "pass" : "fail"; output.textContent = `${passed ? "PASS" : "FAIL"} ${ui}\n${JSON.stringify(report, null, 2)}`;
+        return;
+      }
       if (ui === "phoenix-anchor") {
         const field = globalThis.__resumeAutofillTest.formSchema().find((item) => item.id === "projectEnd1");
         const report = await globalThis.__resumeAutofillTest.applyAssignments([{ key: field.key, index: field.index, label: field.label, value: "2027.06.30", confidence: 1 }]);
@@ -205,6 +221,13 @@
         const output = document.querySelector("#result");
         output.className = passed ? "pass" : "fail";
         output.textContent = `${passed ? "PASS" : "FAIL"} ${ui}\n${JSON.stringify(report, null, 2)}`;
+        return;
+      }
+      if (rerenderPhoenix) {
+        const field = globalThis.__resumeAutofillTest.formSchema().find((item) => item.id === "projectStart1");
+        const report = await globalThis.__resumeAutofillTest.applyAssignments([{ key: field.key, index: field.index, label: field.label, value: "2024-02", confidence: 1 }]);
+        const passed = report.filled === 1 && document.querySelector("#projectStart1").value === "2024-02";
+        const output = document.querySelector("#result"); output.className = passed ? "pass" : "fail"; output.textContent = `${passed ? "PASS" : "FAIL"} ${ui}\n${JSON.stringify(report, null, 2)}`;
         return;
       }
       if (atsx) {
@@ -336,7 +359,7 @@
         name: "张三", phone: "13800138000", email: "test@example.com", birthDate: "2000-01-02", gender: "女", politicalStatus: "群众",
         nativePlace: "广东省汕头市", currentResidence: "广东省广州市", householdRegistration: "广东省汕头市",
         jobIntent: { industry: "互联网", occupation: "前端开发", currentSalary: "7k", expectedSalary: "3500", city: "深圳" },
-        education: [{ school: "测试大学", major: "计算机", degree: "本科", start: "2020-09", end: "2024-06" }, { school: "测试研究生院", major: "软件工程", degree: "硕士", start: "2024-09", end: "2026-06" }],
+        education: [{ school: "测试大学", major: "计算机", degree: "本科", training: "全日制", gpa: "3.85 / 15%", start: "2020-09", end: "2024-06" }, { school: "测试研究生院", major: "软件工程", degree: "硕士", start: "2024-09", end: "2026-06" }],
         experiences: phoenix ? experienceRows : [],
         work: phoenix ? [] : experienceRows,
         internships: phoenix ? experienceRows : [],
@@ -405,6 +428,7 @@
         ["结构化诊断", report.diagnostics?.intentSources?.["期望从事行业"] && report.diagnostics?.educationEndSources?.[0] && report.diagnostics?.experienceSalarySources?.every(Boolean) && report.diagnostics?.experienceLocationSources?.every(Boolean) && report.diagnostics?.structuredAttempts?.some((item) => item.section === "工作经历" && item.row === 2 && item.label === "月薪(税前)" && item.reason === "filled" && item.targetIndex >= 0)],
         ["求职意向已有值保护", text("intentCurrentSalary") === "页面已有月薪"],
         ["教育起止年/月不串填", text("educationStartYear1") === "2020" && text("educationStartMonth1") === "9" && text("educationEndYear1") === "2024" && text("educationEndMonth1") === "6" && text("educationStartYear2") === "2024" && text("educationEndMonth2") === "6"],
+        ["教育培养方式与排名", text("educationTraining1") === "全日制统招" && text("educationRank1") === "TOP20%"],
         ["AI 阶段日期仍结构化填充", deferredDateReport.filled > 0 && deferredDatesFilled],
         ["输入与校验事件", changed.has("input:phone") && changed.has("change:phone")],
         ["组件下拉校验事件", !component || changed.has("change:intentIndustry")],
@@ -427,7 +451,7 @@
         ["技能扩行", document.querySelectorAll("#skillRows .repeat-row").length === 2 && text("skillName1") === "Vue3" && text("skillName2") === "React" && text("skillDescription2") === "用于组件化开发"],
         ["技能等级候选映射", text("skillProficiency1") === "熟练" && text("skillProficiency2") === "熟练"],
         ["语言候选与扩行", document.querySelectorAll("#languageRows .repeat-row").length === 2 && text("languageType2") === "日语" && text("languageProficiency1") === "商务会话" && text("languageSpeaking1") === "熟练" && text("languageReading1") === "熟练" && text("languageReading2") === "一般"],
-        ["证书扩行", document.querySelectorAll("#certificateRows .repeat-row").length === 2 && text("certificateName2") === "CET-6"],
+         ["英语能力独立扩行并按名称对齐", document.querySelectorAll("#certificateRows .repeat-row").length === 2 && text("certificateName1") === "CET-6" && text("certificateName2") === "CET-4" && text("genericCertificateName1") === ""],
         ["重复字段第二条日期", document.querySelectorAll("#awardRows .repeat-row").length === 3 && text("awardName2") === "二等奖" && text("awardYear1") === "2025" && text("awardMonth1") === "4" && text("awardYear2") === "2025" && text("awardMonth2") === "6" && text("awardName3") === "三等奖" && text("awardYear3") === "2024" && text("awardMonth3") === "" && document.querySelectorAll("#workRows .repeat-row").length === 2],
         ["自我描述", text("selfEvaluation") === profile.extras.selfEvaluation]
       ];
