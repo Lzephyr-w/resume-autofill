@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { parseModelJson, sanitizeAssignments, assignmentResults, unsupportedResponseFormat } = require("../ai-proxy/server.js");
+const { parseModelJson, sanitizeAssignments, assignmentResults, mappingResults, unsupportedResponseFormat } = require("../ai-proxy/server.js");
 
 assert.deepEqual(parseModelJson('```json\n{"assignments":[]}\n```'), { assignments: [] });
 assert.equal(unsupportedResponseFormat({ error: { message: "This response_format type is unavailable now" } }), true);
@@ -30,4 +30,16 @@ assert.deepEqual(sanitizeAssignments({ assignments: [{ key: "speaking", index: 0
 const locationField = { key: "location", index: 0, type: "combobox", label: "所在地点", options: ["中国大陆", "广东"], locationCandidates: [{ key: "currentResidence", label: "现居住地", value: "广东省广州市" }] };
 assert.equal(sanitizeAssignments({ assignments: [{ key: "location", index: 0, label: "所在地点", value: "广东省广州市", confidence: 0.9 }] }, [locationField])[0].value, "广东省广州市");
 assert.equal(assignmentResults({ assignments: [{ key: "location", index: 0, label: "所在地点", value: "广东", confidence: 0.9 }] }, [locationField])[0].reason, "not-a-location-candidate");
-console.log("PASS ai-proxy compatibility");
+const textField = { key: "opaque-text", type: "text", sources: [{ path: "education[1].major" }], isChoice: false };
+const mapped = (item) => mappingResults({ assignments: [{ key: textField.key, confidence: 0.95, ...item }] }, [textField])[0];
+assert.equal(mapped({ profilePath: "education[1].major", value: "模型捏造的文本" }).assignment.value, "");
+assert.equal(mapped({ profilePath: "education[0].major" }).reason, "invalid-profile-path");
+assert.equal(mapped({ key: "expired", index: 0, profilePath: "education[1].major" }).reason, "ai-no-assignment");
+assert.equal(mappingResults({ assignments: [{ key: textField.key }, { key: textField.key }] }, [textField])[0].reason, "ambiguous-mapping");
+assert.equal(assignmentResults({ assignments: [{ key: "expired", index: 0, value: "深圳市", confidence: 1 }] }, [pageCandidateField])[0].reason, "unknown-field");
+console.log("PASS ai-proxy compatibility and profile-path validation");
+const certificateChoice = { key: "certificate", isChoice: true, options: ["教师资格证", "其他"], sources: [{ path: "certificates[0].name", value: "大学英语四级" }] };
+const fallbackMapping = { assignments: [{ key: "certificate", profilePath: "certificates[0].name", value: "其他", confidence: 0.99 }] };
+assert.equal(mappingResults(fallbackMapping, [certificateChoice])[0].reason, "fallback-option-not-source");
+assert.equal(mappingResults(fallbackMapping, [{ ...certificateChoice, sources: [{ path: "certificates[0].name", value: "其他" }] }])[0].reason, "accepted");
+console.log("PASS explicit source cannot become a generic fallback option");

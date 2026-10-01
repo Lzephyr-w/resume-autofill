@@ -360,7 +360,7 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
-const CONTENT_MESSAGE_SUFFIX = "_V95";
+const CONTENT_MESSAGE_SUFFIX = "_V98";
 const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
 const injectCurrentContent = (tabId) => {
   if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");
@@ -405,7 +405,7 @@ function aiFieldContext(field, profile) {
   const personalSource = /家乡|籍贯/.test(label) ? profile?.nativePlace
     : /户籍|户口/.test(label) ? profile?.householdRegistration
       : /居住|所在(?:地|地点|地区)?/.test(label) ? profile?.currentResidence : "";
-  const rows = /实习/.test(module) ? (profile?.internships?.length ? profile.internships : all) : /工作/.test(module) ? (profile?.work?.length ? profile.work : all) : /工作地点|月薪|职位名称|所在部门|工作性质/.test(label) ? all : [];
+  const rows = /实习/.test(module) ? (profile?.internships?.length ? profile.internships : all) : /工作/.test(module) ? (profile?.separateInternships ? profile.work || [] : profile?.work?.length ? profile.work : all) : /工作地点|月薪|职位名称|所在部门|工作性质/.test(label) ? all : [];
   const educationType = /学历类型|受教育类型|培养方式|学习方式|就读方式/.test(label) ? profile?.education?.[index]?.training : "";
   const languageProficiency = /语言/.test(module) && /掌握程度|熟练程度|精通程度|语言水平/.test(label) ? profile?.languages?.[index]?.proficiency : "";
   const intentField = /求职意向|期望|现月薪|工作城市|行业|职业|到岗/.test(`${module} ${label}`);
@@ -426,6 +426,69 @@ const locationSearchHint = (field, profile) => {
   return company.match(/^([\u4e00-\u9fff]{2,6}市)/)?.[1] || company.match(/^([\u4e00-\u9fff]{2})/)?.[1] || source;
 };
 const fieldsWithLiveOptions = (fields) => (fields || []).filter(Boolean).filter((field) => field.options?.length);
+const semanticTextField = (field) => !field.isChoice && /^(?:text|textarea|email|tel|url|number|date|month|contenteditable)$/.test(field.type || "");
+function profileSources(field, profile) {
+  const module = field.module || "";
+  const group = /教育|学历/.test(module) ? "education" : /实习/.test(module) ? "internships"
+    : /工作|任职/.test(module) ? (!profile.separateInternships && profile.experiences?.length ? "experiences" : "work") : /项目/.test(module) ? "projects"
+      : /获奖|奖励|竞赛/.test(module) ? "awards" : /证书|英语/.test(module) ? "certificates"
+        : /语言|外语/.test(module) ? "languages" : /技能|计算机能力/.test(module) ? "skills" : /干部|社团|校园经历/.test(module) ? "cadres" : "";
+  const groupRows = (profile[group] || []).map((item, index) => ({ item, index })).filter(({ item }) =>
+    group !== "certificates" || !profile.separateEnglishCertificates ||
+    (/英语|英语能力/.test(module) === /(?:CET\s*-?\s*[46]|大学英语[四六]级|英语[四六]级|TEM\s*-?\s*[48]|IELTS|TOEFL|雅思|托福)/i.test(String(item?.name || ""))));
+  let row = Math.max(0, Number(field.repeatIndex) || 0);
+  const anchorKey = group === "education" ? "school" : /work|internships|experiences/.test(group) ? "company" : "name";
+  if (group && field.rowAnchor?.value) {
+    const matches = groupRows.map(({ item, index }, rowIndex) => ({ item, index: rowIndex })).filter(({ item }) => choiceToken(item[anchorKey]) === choiceToken(field.rowAnchor.value));
+    if (matches.length !== 1) return [];
+    row = matches[0].index;
+  }
+  const sources = [];
+  const add = (path, value) => { if (!/password|api.?key|token|密码|验证码/i.test(path) && (typeof value === "string" || typeof value === "number") && String(value).trim()) sources.push({ path, value: String(value) }); };
+  if (group) Object.entries(groupRows[row]?.item || {}).forEach(([key, value]) => add(`${group}[${groupRows[row].index}].${key}`, value));
+  else {
+    for (const key of ["name", "gender", "phone", "email", "birthDate", "age", "nationality", "politicalStatus", "nativePlace", "householdRegistration", "currentResidence", "wechat", "workExperience"] ) add(key, profile[key]);
+    for (const root of ["jobIntent", "extras", "customFields"]) Object.entries(profile[root] || {}).forEach(([key, value]) => add(`${root}[${JSON.stringify(key)}]`, value));
+  }
+  const standardPath = { name: "name", email: "email", tel: "phone", bday: "birthDate", sex: "gender" }[String(field.autocomplete || "").split(" ").at(-1)]
+    || ({ email: "email", tel: "phone" })[field.type];
+  return (standardPath ? sources.filter((source) => source.path === standardPath) : sources).slice(0, 100);
+}
+async function semanticMatch(fields, profile) {
+  const sourceMaps = new Map(fields.map((field) => [field.key, new Map(profileSources(field, profile).map(({ path, value }) => [path, value]))]));
+  const payload = fields.slice(0, 120).map((field) => {
+    const sources = sourceMaps.get(field.key);
+    const choice = !semanticTextField(field);
+    const bounded = (value) => String(value || "").slice(0, 160);
+    return {
+      key: field.key, label: bounded(field.label), type: field.type, module: bounded(field.module), repeatIndex: field.repeatIndex,
+      autocomplete: bounded(field.autocomplete), ariaLabel: bounded(field.ariaLabel), placeholder: bounded(field.placeholder),
+      name: bounded(field.name), id: bounded(field.id), title: bounded(field.title),
+      labels: (field.labels || []).slice(0, 3).map(bounded), data: field.data || {}, isChoice: choice,
+      options: choice ? (field.options || []).slice(0, 80).map(bounded) : [], optionSource: field.optionSource,
+      // Text pairing needs field names, not contact details or full resume prose.
+      sources: [...sources].map(([path, value]) => ({ path, ...(choice ? { value: value.slice(0, 160) } : {}) }))
+    };
+  }).filter((field) => field.sources.length);
+  if (!payload.length) return { assignments: [], diagnostics: fields.map((field) => ({ key: field.key, stage: "match", reason: "profile-value-missing" })) };
+  const response = await fetch(`${proxyUrl}/match`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fields: payload }) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "AI 服务返回错误");
+  const returned = Array.isArray(result.assignments) ? result.assignments : [];
+  const assignments = returned.flatMap((item) => {
+    if (!item || returned.filter((other) => other?.key === item.key).length !== 1) return [];
+    const field = fields.find((candidate) => candidate.key === item.key);
+    const value = sourceMaps.get(item.key)?.get(item.profilePath);
+    const submitted = payload.find((candidate) => candidate.key === item.key);
+    if (!field || field.currentValue || !value || !submitted?.sources.some((source) => source.path === item.profilePath)
+      || !Number.isFinite(item.confidence) || item.confidence < 0.8 || item.confidence > 1) return [];
+    if (!semanticTextField(field) && !field.options?.includes(item.value)) return [];
+    if (field.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return [];
+    if (field.type === "number" && !Number.isFinite(Number(value))) return [];
+    return [{ key: field.key, label: field.label, profilePath: item.profilePath, value: semanticTextField(field) ? value : item.value, confidence: Number(item.confidence) }];
+  });
+  return { assignments, diagnostics: result.diagnostics || [] };
+}
 const hasProfileContext = (field, profile) => Object.values(aiFieldContext(field, profile)).some((value) => value && (typeof value !== "object" || Object.values(value).some(Boolean)));
 const choiceToken = (value) => String(value || "").toLowerCase().replace(/[：:（）()\[\]【】／\/\s_-]/g, "");
 const uniqueAnchorOption = (value, options) => {
@@ -438,8 +501,14 @@ const uniqueAnchorOption = (value, options) => {
   return best >= 2 && matches.length === 1 ? matches[0].option : "";
 };
 const salaryRange = (value) => {
-  const amounts = [...String(value || "").toLowerCase().matchAll(/(\d+(?:\.\d+)?)\s*(万|w|k|千)?/g)].map(([, number, unit]) => Number(number) * (/万|w/.test(unit) ? 10000 : /k|千/.test(unit) ? 1000 : 1));
-  return amounts.length ? [Math.min(...amounts), Math.max(...amounts)] : null;
+  const text = String(value || "").toLowerCase();
+  const found = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(万|w|k|千)?/g)];
+  const sharedUnit = found.length > 1 && found.filter((match) => match[2]).length === 1 ? found.find((match) => match[2])?.[2] : "";
+  const amounts = found.map(([, number, unit]) => Number(number) * (/万|w/.test(unit || sharedUnit) ? 10000 : /k|千/.test(unit || sharedUnit) ? 1000 : 1));
+  if (!amounts.length || /面议|保密/.test(text)) return null;
+  if (amounts.length === 1 && /以下|以内|不超过|及以下/.test(text)) return [0, amounts[0]];
+  if (amounts.length === 1 && /以上|起|及以上/.test(text)) return [amounts[0], Infinity];
+  return [Math.min(...amounts), Math.max(...amounts)];
 };
 const languageProficiencyCandidate = (value, options) => {
   const levels = ["", "入门", "日常会话", "商务会话", "无障碍沟通", "母语"];
@@ -457,11 +526,14 @@ const localCandidate = (field, profile) => {
   if (language) return language;
   if (/薪|工资|待遇/.test(fieldLabel(field))) {
     const range = salaryRange(value);
-    const matches = range && range[0] === range[1] ? options.filter((option) => {
+    const scored = range && Number.isFinite(range[1]) ? options.map((option) => {
       const candidate = salaryRange(option);
-      return candidate && candidate[0] <= range[0] && range[0] <= candidate[1];
-    }) : [];
-    return matches.length === 1 ? matches[0] : "";
+      const overlap = candidate && Math.max(0, Math.min(candidate[1], range[1]) - Math.max(candidate[0], range[0]));
+      const score = candidate && range[0] === range[1] ? Number(candidate[0] <= range[0] && range[0] <= candidate[1])
+        : overlap / Math.max(1, range[1] - range[0]);
+      return { option, score };
+    }).sort((a, b) => b.score - a.score) : [];
+    return scored[0]?.score >= 0.9 && scored[0].score > (scored[1]?.score || 0) + 0.1 ? scored[0].option : "";
   }
   const matches = wanted.length >= 2 ? options.filter((option) => {
     const candidate = choiceToken(option);
@@ -565,41 +637,55 @@ $("connect").addEventListener("click", async () => {
   } catch (error) { message(String(error.message).includes("Failed to fetch") ? "配置已保存，但本地 Node 代理未启动。请先运行 README 中的 node 命令。" : error.message, !String(error.message).includes("Failed to fetch"), "connect-status", String(error.message).includes("Failed to fetch") ? "hint" : ""); }
 });
 
-$("ai").addEventListener("click", async () => {
-  const tab = await activeTab();
+async function fillPage(tabId) {
+  const tab = Number.isInteger(tabId) ? await chrome.tabs.get(tabId) : await activeTab();
   if (!isWebPage(tab?.url)) return message("请先打开要填充的网页表单。", true, "ai-status");
   const formData = collectManualForm();
   if (!hasManualData(formData)) return message("请先填写手动表单。", true, "ai-status");
   try {
+    await chrome.storage.local.remove("lastAiDiagnostics");
     message("正在读取表单字段并请求 AI 匹配…", false, "ai-status");
-    const profile = await saveManualProfile(false);
+    let profile = await saveManualProfile(false);
     await injectCurrentContent(tab.id);
     const target = await formFrame(tab.id);
     // Deterministic structured fill is the source of truth. AI only handles
     // fields that remain unresolved after real page choices are attempted.
     const repaired = await sendToFrame(tab.id, target.frameId, { type: "FILL_PROFILE", profile, options: { onlyEmpty: true, deferChoices: true } });
     let schema = await sendToFrame(tab.id, target.frameId, { type: "GET_FORM_SCHEMA" });
+    profile = { ...profile, separateInternships: (schema.fields || []).some((field) => /实习/.test(field.module || "")) };
+    profile.separateEnglishCertificates = (schema.fields || []).some((field) => /英语能力|英语证书/.test(field.module || ""));
     let emptyFields = uniqueEmptyFields(schema.fields || []);
     if (!emptyFields.length) {
       return message(`已填充 ${repaired.filled} 项，保留页面原值 ${repaired.skippedFields?.length || 0} 项；请检查后自行提交。`, false, "ai-status");
     }
     let candidateFilled = 0; let aiFilled = 0;
     const aiDiagnostics = [];
+    let aiConfigured = false;
+    const match = async (fields) => {
+      if (!aiConfigured) {
+        const { aiConfig } = await chrome.storage.local.get("aiConfig");
+        if (!aiConfig?.apiKey) throw new Error("请先保存 AI 配置。当前已完成的结构化填充会保留。");
+        const configured = await fetch(`${proxyUrl}/config`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aiConfig) });
+        if (!configured.ok) throw new Error("本地 AI 代理配置失败，请检查侧栏配置。");
+        aiConfigured = true;
+      }
+      return semanticMatch(fields, profile);
+    };
     // The second pass only rereads cascade children that appeared after a real selection.
     let retryKeys;
     for (let pass = 0; pass < 2 && emptyFields.length; pass++) {
       const passFields = retryKeys ? emptyFields.filter((field) => retryKeys.has(field.key)) : emptyFields;
-      const eligible = passFields.filter((field) => !missingLocalValue(field, profile) && hasProfileContext(field, profile));
+      const eligible = passFields.filter((field) => !missingLocalValue(field, profile) && (hasProfileContext(field, profile) || profileSources(field, profile).length));
       const live = eligible.length ? await sendToFrame(tab.id, target.frameId, { type: "GET_LIVE_OPTIONS", keys: eligible.map((field) => field.key) }) : { fields: [] };
       const eligibleKeys = new Set(eligible.map((field) => field.key));
       const scannedFields = uniqueEmptyFields(live.fields || []).filter((field) => eligibleKeys.has(field.key));
-      const liveFields = fieldsWithLiveOptions(scannedFields).map((field) => ({ ...field, profileContext: aiFieldContext(field, profile) }));
+      const liveFields = scannedFields.filter((field) => semanticTextField(field) || fieldsWithLiveOptions([field]).length).map((field) => ({ ...field, profileContext: aiFieldContext(field, profile) }));
       const absentFields = emptyFields.filter((field) => missingLocalValue(field, profile));
       const baseDiagnostics = absentFields.map((field) => ({ key: field.key, label: field.label, optionCount: 0, optionSource: "not-requested", reason: "profile-value-missing" }));
       const unreadChoices = scannedFields.filter((field) => ["popup", "popup-not-found"].includes(field.optionSource) && !field.options?.length)
         .map((field) => ({ key: field.key, label: field.label, optionCount: 0, optionSource: field.optionSource, reason: field.optionSource === "popup-not-found" ? "candidate-not-read" : "options-unavailable" }));
       if (!liveFields.length) { aiDiagnostics.push({ pass: pass + 1, fields: [], model: [...baseDiagnostics, ...unreadChoices], apply: [] }); break; }
-      const localCascade = cascadeCandidateAssignments(liveFields.filter(isCascadeField), profile);
+      const localCascade = cascadeCandidateAssignments(liveFields.filter((field) => !semanticTextField(field) && isCascadeField(field)), profile);
       const localCascadeKeys = new Set(localCascade.map((item) => item.key));
       const localAssignments = localCandidateAssignments(liveFields.filter((field) => !localCascadeKeys.has(field.key) && !field.isMultiSelector), profile);
       const directSearch = searchableSelectorAssignments(liveFields, profile, new Set(localAssignments.map((item) => item.key)));
@@ -608,22 +694,16 @@ $("ai").addEventListener("click", async () => {
       const locallyFilled = new Set((local.diagnostics || []).filter((item) => item.reason === "filled").map((item) => item.key));
       const aiFields = liveFields.filter((field) => !locallyFilled.has(field.key) && !localCascadeKeys.has(field.key));
       let result = { assignments: [], diagnostics: [] };
-      if (aiFields.length) {
-        const response = await fetch("http://127.0.0.1:8787/match", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile, fields: aiFields })
-        });
-        result = await response.json();
-        if (!response.ok) throw new Error(result.error || "AI 服务返回错误");
-      }
-      const fieldFor = (assignment) => liveFields.find((field) => field.key === assignment.key || field.index === assignment.index);
-      const aiCascade = (result.assignments || []).filter((assignment) => isCascadeField(fieldFor(assignment)))
+      if (aiFields.length) result = await match(aiFields);
+      const fieldFor = (assignment) => liveFields.find((field) => field.key === assignment.key);
+      const aiCascade = (result.assignments || []).filter((assignment) => !semanticTextField(fieldFor(assignment)) && isCascadeField(fieldFor(assignment)))
         .map((assignment) => {
           const field = fieldFor(assignment);
           const sourceValue = field?.profileContext?.sourceValue || assignment.value;
           return { ...assignment, value: isLocationField(field) ? sourceValue : assignment.value, sourceValue, locationHint: isLocationField(field) ? locationSearchHint(field, profile) : "", directLocationSearch: isLocationField(field) };
         });
       const cascadeAssignments = [...localCascade, ...aiCascade, ...searchableCascadeAssignments(liveFields.filter(isCascadeField), profile, new Set([...localCascade, ...aiCascade].map((item) => item.key)))];
-      const regularAssignments = (result.assignments || []).filter((assignment) => !isCascadeField(fieldFor(assignment)));
+      const regularAssignments = (result.assignments || []).filter((assignment) => semanticTextField(fieldFor(assignment)) || !isCascadeField(fieldFor(assignment)));
       let applied = { filled: 0, diagnostics: [] };
       let appliedAiFilled = 0;
       const appendApplied = (part, aiKeys) => {
@@ -662,9 +742,7 @@ $("ai").addEventListener("click", async () => {
           const localValue = localCandidate(childField, profile);
           let next = localValue ? { key: childField.key, index: childField.index, label: childField.label, value: localValue, confidence: 1, sourceValue: childField.profileContext?.sourceValue || "", local: true } : null;
           if (!next) {
-            const response = await fetch("http://127.0.0.1:8787/match", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile, fields: [childField] }) });
-            const childResult = await response.json();
-            if (!response.ok) throw new Error(childResult.error || "AI 服务返回错误");
+            const childResult = await match([childField]);
             model = [...model, ...(childResult.diagnostics || [])];
             next = childResult.assignments?.[0] && { ...childResult.assignments[0], sourceValue: childField.profileContext?.sourceValue || "" };
           }
@@ -682,7 +760,7 @@ $("ai").addEventListener("click", async () => {
       const noAssignment = model.filter((item) => item.reason === "ai-no-assignment");
       if (!noAssignment.length) noAssignment.push(...aiFields.filter((field) => !returned.has(field.key)).map((field) => ({ key: field.key, label: field.label, optionCount: field.options?.length || 0, optionSource: field.optionSource || "", reason: "ai-no-assignment" })));
       aiDiagnostics.push({ pass: pass + 1, fields: liveFields.map(({ key, index, label, module, repeatIndex, optionSource, optionCount, hasSearch, scrolled, options }) => ({ key, index, label, module, repeatIndex, optionSource, optionCount, hasSearch, scrolled, options })), model: [...baseDiagnostics, ...unreadChoices, ...model, ...noAssignment], apply: [...(local.diagnostics || []), ...(applied.diagnostics || [])] });
-      console.info("[resume-autofill] AI select diagnostics", aiDiagnostics.at(-1));
+      console.info("[resume-autofill] AI matching", { pass: pass + 1, fields: liveFields.length, filled: applied.filled || 0 });
       aiFilled += appliedAiFilled;
       retryKeys = retryFieldKeys(scannedFields, (local.filled || 0) + (applied.filled || 0));
       if (!retryKeys.size) break;
@@ -699,60 +777,49 @@ $("ai").addEventListener("click", async () => {
     const allDiagnostics = { structured: repaired.diagnostics?.structuredAttempts || [], targetFields: repaired.diagnostics?.targetFields || [], experienceLocations: repaired.diagnostics?.experienceLocations || [], sources: repaired.diagnostics?.intentSources || {}, deferredFields: repaired.diagnostics?.deferredFields || [], ai: aiDiagnostics };
     const absentStructured = [...new Set(allDiagnostics.structured.filter((item) => item.reason === "profile-value-missing")
       .map((item) => `${item.section || "字段"}[${Number(item.row) || 1}].${item.label}`))].join("、");
-    await chrome.storage.local.set({ lastAiDiagnostics: allDiagnostics });
-    show({ ...profile, __aiDiagnostics: allDiagnostics });
-    const failurePriority = { "page-option-or-validation-failed": 0, "field-not-found": 0, "cascade-child-options-not-read": 1, "not-a-page-option": 1, "candidate-not-read": 1, "options-unavailable": 1, "low-confidence": 2, "ai-no-assignment": 3, "unknown-field": 3, "cascade-parent-selected": 3, "profile-value-missing": 9 };
-    const seenFailures = new Set();
-    const failed = aiDiagnostics.flatMap((item) => [...item.model, ...item.apply])
-      .filter((item) => item.reason && !["accepted", "filled", "profile-value-missing"].includes(item.reason))
-      .sort((a, b) => (failurePriority[a.reason] ?? 4) - (failurePriority[b.reason] ?? 4))
-      .filter((item) => { const key = item.key || item.label; if (!key || seenFailures.has(key)) return false; seenFailures.add(key); return true; }).slice(0, 3);
-    const reasonText = { "popup-not-found": "未找到弹层", "candidate-not-read": "候选未读取", "cascade-child-options-not-read": "父级后未读到子级候选", "options-unavailable": "候选为空", "not-a-page-option": "候选校验拒绝", "ai-no-assignment": "AI未返回", "page-option-or-validation-failed": "点击后页面未确认", "low-confidence": "AI置信度不足", "unknown-field": "字段未定位", "field-not-found": "字段未定位", "cascade-parent-selected": "子级候选未确认", "profile-value-missing": "本地档案未提供", "deferred-to-ai": "已交给候选 AI", "page-value-protected": "已有值保护", "start-date-not-confirmed": "开始日期未确认，已跳过结束日期" };
-    const structuralSalary = allDiagnostics.structured.find((item) => item.label === "月薪(税前)" && item.row === 2 && !["filled", "deferred-to-ai"].includes(item.reason));
-    const choiceText = structuralSalary?.choice ? (structuralSalary.choice.optionFound ? `（候选“${structuralSalary.choice.option}”，点击后“${structuralSalary.choice.afterConfirm || structuralSalary.choice.afterClick || "空"}”）` : "（未找到3500对应候选）") : "";
-    const structuralText = structuralSalary ? `；第2条经历月薪：${reasonText[structuralSalary.reason] || structuralSalary.reason}${choiceText}` : "";
-    const structuralAward = allDiagnostics.structured.find((item) => item.section === "获奖经历" && item.row === 2 && item.label === "获奖时间" && item.reason !== "filled");
-    const awardSource = structuralAward && (!structuralAward.value ? "本地日期为空" : structuralAward.datePartCount < 2 ? "本地仅含年份" : "本地含年月");
-    const choiceStep = (choice, part) => {
-      const trace = choice || {};
-      const path = trace.path ? `路径 ${trace.path}，` : "";
-      const state = trace.optionFound ? `候选“${trace.option || ""}”` : trace.failure === "popup-not-found" ? "未找到弹层" : "未找到候选";
-      const after = trace.afterConfirm || trace.afterClick || "空";
-      return `${part}：${path}${state}，点击后“${after}”${trace.confirmed ? "，已确认" : `，未确认${trace.failure ? `（${trace.failure}）` : ""}`}`;
-    };
-    const awardChoice = structuralAward?.choice ? `（${choiceStep(structuralAward.choice, "年")}${structuralAward.choice.month ? `；${choiceStep(structuralAward.choice.month, "月")}` : ""}）` : "（未记录选择路径）";
-    const educationFailures = allDiagnostics.structured.filter((item) => item.section === "教育背景"
-      && /学校名称|专业名称|学历/.test(item.label) && item.reason !== "filled");
-    const educationText = educationFailures.length ? `；教育选择诊断：${educationFailures.map((item) => {
-      const trace = item.choice || {};
-      const state = trace.afterClickState || {};
-      return `${choiceStep(trace, item.label)}，click=${trace.clickObserved ? "到达" : "未到达"}，显示=${(state.displays || []).join("/") || "空"}，弹层=${state.popupVisible ? "开" : "关"}`;
-    }).join("；")}` : "";
-    const awardTarget = structuralAward ? `（${structuralAward.targetIndex >= 0 ? "字段已定位" : "字段未定位"}，日期控件 ${structuralAward.dateControlCount || 0} 个）` : "";
-    const awardText = structuralAward ? `；第2条获奖时间：${awardSource}，${reasonText[structuralAward.reason] || structuralAward.reason}${awardChoice}${awardTarget}` : "";
-    const diagnosticText = failed.length ? `；AI诊断：${failed.map((item) => {
-      const area = item.choice?.area;
-      const choice = item.reason === "page-option-or-validation-failed" && item.choice ? (area ? `（地区协议 V${area.protocol || "?"}，值“${area.source || "空"}”，提示“${area.hint || area.companyHint || "空"}”，搜索“${area.search || area.city || "空"}”，弹层${area.popupFound ? "有" : "无"}，搜索框${area.searchFound ? "有" : "无"}，候选 ${area.candidates?.length || 0} 个${item.choice.optionFound ? `，匹配“${item.choice.option || ""}”，点击${item.choice.selectionAttempts?.length || 0}处（原生${item.choice.selectionAttempts?.some((attempt) => attempt.trusted) ? "已发送" : "未发送"}），已选${item.choice.selectionObserved ? "是" : "否"}，确认${item.choice.confirmFound ? "有" : "无"}` : "，未匹配"}，确认后“${item.choice.afterConfirm || "空"}”）` : item.choice.optionFound ? `（候选“${item.choice.option || ""}”，点击后“${item.choice.afterClick || "空"}”，确认后“${item.choice.afterConfirm || "空"}”${item.choice.confirmFound ? `，确认目标“${item.choice.confirmTarget?.className || item.choice.confirmTarget?.tag || "未知"}”${item.choice.confirmClick?.trusted ? "（原生已发送）" : "（原生未发送）"}` : "，无确认"}）` : "（未找到页面候选）")
-        : "";
-      const detail = choice ? "" : item.reason === "low-confidence" && Number.isFinite(Number(item.confidence)) ? `（置信度 ${Number(item.confidence).toFixed(2)}，候选 ${item.optionCount || 0} 个）`
-        : ["ai-no-assignment", "not-a-page-option", "candidate-not-read", "options-unavailable"].includes(item.reason) ? `（候选 ${item.optionCount || 0} 个${item.optionSource ? `，${item.optionSource}` : ""}）` : "";
-      return `${item.label || item.key}:${reasonText[item.reason] || item.reason}${choice || detail}`;
-    }).join("、")}` : "";
-    const dateFailures = allDiagnostics.structured.filter((item) => /开始时间|结束时间/.test(item.label) && !["filled", "page-value-protected"].includes(item.reason)).slice(0, 4);
-    const dateText = dateFailures.length ? `；日期选择诊断：${dateFailures.map((item) => {
-      const trace = item.choice || {}; const picker = trace.datePicker || {};
-      const year = picker.targetYear ? `${picker.currentYear || "?"}→${picker.targetYear}(${picker.yearMethod || "未选择"}${picker.yearOptionFound === false ? "/无候选" : ""})` : "未识别";
-      const month = picker.month ? `${picker.month}月${picker.monthFound ? "已点击" : "未找到"}` : "未识别";
-      return `${item.section}[${item.row}].${item.label}:${reasonText[item.reason] || item.reason}（协议 ${picker.protocol ? `V${picker.protocol}` : "旧版"}，路径 ${trace.path || "无"}，弹层 ${picker.panelFound ? "年月" : picker.popupCount ? "非年月" : "无"}，年份 ${year}，月份 ${month}，显示“${picker.after || item.actual || trace.afterConfirm || "空"}”${trace.failure ? `，${trace.failure}` : ""}）`;
-    }).join("；")}` : "";
-    const absentProfile = [absentIntent, absentStructured].filter(Boolean).join("、");
-    message(`结构化填充 ${repaired.filled} 项，实时候选匹配 ${candidateFilled} 项，AI 补充 ${aiFilled} 项，保留页面原值 ${repaired.skippedFields?.length || 0} 项${remaining.length ? `；页面仍有 ${remaining.length} 个空字段${examples ? `（${examples}）` : ""}` : ""}${unresolvedText ? `；结构化未完成：${unresolvedText}` : ""}${unavailableText ? `；页面未提供：${unavailableText}` : ""}${absentProfile ? `；本地档案未提供：${absentProfile}` : ""}${structuralText}${awardText}${educationText}${dateText}${diagnosticText}。请检查后自行提交。`, false, "ai-status");
+    const stageFor = (reason) => /field-not-found|unknown-field/.test(reason) ? "scan"
+      : /candidate|option/.test(reason) ? "candidate" : /filled|validation|confirm|protected/.test(reason) ? "interaction" : "match";
+    const safeDiagnostic = (item) => ({ key: item.key, label: item.label, section: item.section, row: item.row,
+      stage: item.stage || stageFor(item.reason || ""), reason: item.reason, optionCount: item.optionCount,
+      interaction: item.choice?.failure, path: item.choice?.path, dateControlCount: item.dateControlCount });
+    const diagnostics = [...allDiagnostics.structured, ...aiDiagnostics.flatMap((pass) => [...pass.model, ...pass.apply])].map(safeDiagnostic);
+    await chrome.storage.local.set({ lastAiDiagnostics: { protocol: 98, discovered: after.fields?.length || 0, structuredFilled: repaired.filled,
+      candidateFilled, aiFilled, protected: repaired.skippedFields?.length || 0, remaining: remaining.length, diagnostics } });
+    const failures = diagnostics.filter((item) => !["filled", "accepted", "page-value-protected", "deferred-to-ai"].includes(item.reason));
+    const failureText = [...new Set(failures.map((item) => `${item.stage}:${item.reason}`))].slice(0, 6).join("、");
+    message(`结构化确认 ${repaired.filled} 项，候选确认 ${candidateFilled} 项，AI 确认 ${aiFilled} 项，保留原值 ${repaired.skippedFields?.length || 0} 项；发现 ${after.fields?.length || 0} 个字段，剩余 ${remaining.length} 个空字段${failureText ? `；诊断：${failureText}` : ""}。请检查后自行提交。`, false, "ai-status");
   } catch (error) {
     const detail = String(error.message || error);
     if (detail.includes("Failed to fetch")) { $("ai-status").textContent = ""; $("ai-status").className = ""; message("配置已保存，但本地 Node 代理未启动。请先运行 README 中的 node 命令。", false, "connect-status", "hint"); }
     else message(detail.includes("Receiving end does not exist") ? "插件脚本未注入当前页面，请重新加载插件后重试。" : detail, true, "ai-status");
   }
+}
+let fillInProgress = false;
+async function fillCurrentPage(tabId) {
+  if (fillInProgress) return;
+  fillInProgress = true;
+  $("ai").disabled = true;
+  try { await popupReady; await fillPage(tabId); }
+  finally { fillInProgress = false; $("ai").disabled = false; }
+}
+$("ai").addEventListener("click", () => fillCurrentPage());
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request?.type !== "RESUME_AUTOFILL_PAGE_RUN_V98" || sender.id !== chrome.runtime.id || sender.tab || !Number.isInteger(request.tabId)) return false;
+  if (fillInProgress) { sendResponse({ status: "已有填充正在进行，请等待完成。" }); return false; }
+  fillCurrentPage(request.tabId).then(async () => {
+    const { lastAiDiagnostics } = await chrome.storage.local.get("lastAiDiagnostics");
+    sendResponse({ status: $("ai-status").textContent, diagnostics: lastAiDiagnostics });
+  }).catch(() => sendResponse({ status: "填充失败，请查看简历助手侧栏。" }));
+  return true;
 });
+async function showPageAction(tabId) {
+  if (fillInProgress) return;
+  const tab = await chrome.tabs.get(tabId);
+  if (!isWebPage(tab?.url)) return;
+  await injectCurrentContent(tabId);
+  await sendToFrame(tabId, 0, { type: "SHOW_PAGE_ACTION" });
+}
+chrome.tabs.onActivated.addListener(({ tabId }) => showPageAction(tabId).catch(() => {}));
 
 const MANUAL_STORAGE_KEY = "applicationFormData";
 const MANUAL_SINGLE_FIELD_IDS = [
@@ -765,7 +832,7 @@ const REPEAT_GROUPS = {
   projects: { firstId: "projectName1", label: "项目", addLabel: "新增项目", fields: [["name", "projectName"], ["role", "projectRole"], ["start", "projectStart"], ["end", "projectEnd"], ["link", "projectLink"], ["description", "projectDesc"], ["responsibilities", "projectDuty"]] },
   cadres: { firstId: "cadrePosition1", label: "干部经历", addLabel: "新增干部经历", fields: [["position", "cadrePosition"], ["level", "cadreLevel"], ["start", "cadreStart"], ["end", "cadreEnd"], ["duty", "cadreDuty"]] },
   languageAbilities: { firstId: "languageType1", label: "语言能力", addLabel: "新增语言能力", fields: [["language", "languageType"], ["proficiency", "languageProficiency"], ["speaking", "languageSpeaking"], ["reading", "languageReading"]] },
-  certificates: { firstId: "languageCert1", label: "证书", addLabel: "新增证书", fields: [["name", "languageCert"], ["score", "languageScore"], ["date", "languageDate"]] },
+  certificates: { firstId: "languageCert1", label: "证书", addLabel: "新增证书", fields: [["name", "languageCert"], ["score", "languageScore"], ["date", "languageDate"], ["description", "languageDesc"]] },
   awards: { firstId: "awardName1", label: "获奖", addLabel: "新增获奖经历", fields: [["name", "awardName"], ["level", "awardLevel"], ["date", "awardDate"], ["description", "awardDesc"]] }
 };
 const manualHasValues = (row) => Object.values(row).some((value) => String(value ?? "").trim());
@@ -884,7 +951,7 @@ function manualProfileFromForm(data) {
     cadres: repeatRowsFromData(data, "cadres"),
     skills,
     languages: repeatRowsFromData(data, "languageAbilities"),
-    certificates: repeatRowsFromData(data, "certificates").map((row) => ({ ...row, description: row.score ? `成绩：${row.score}` : "" })),
+    certificates: repeatRowsFromData(data, "certificates").map((row) => ({ ...row, description: row.description || (row.score ? `成绩：${row.score}` : "") })),
     awards: repeatRowsFromData(data, "awards"),
     customFields,
     extras: { skills: data.skills, selfEvaluation: data.selfEvaluation, studentCadres: cadres }
@@ -920,6 +987,16 @@ function isManualFormData(data) {
   return ["fullName", "internCompany1", "educations", "experiences", "cadres", "skills", "languageAbilities", "certificates"].some((key) => Object.hasOwn(data || {}, key));
 }
 
+function restoredManualData(stored) {
+  const data = stored[MANUAL_STORAGE_KEY] || (stored.profile && manualFormFromProfile(stored.profile));
+  if (!data?.certificates?.length || !stored.profile?.certificates?.length) return data;
+  return { ...data, certificates: data.certificates.map((row) => {
+    if (row.description || !row.name) return row;
+    const matches = stored.profile.certificates.filter((item) => item.name === row.name && item.description);
+    return matches.length === 1 ? { ...row, description: matches[0].description } : row;
+  }) };
+}
+
 async function saveManualProfile(showMessage = true) {
   const formData = collectManualForm();
   const profile = manualProfileFromForm(formData);
@@ -931,7 +1008,7 @@ async function saveManualProfile(showMessage = true) {
 
 async function loadManualForm() {
   const stored = await chrome.storage.local.get([MANUAL_STORAGE_KEY, "profile"]);
-  const data = stored[MANUAL_STORAGE_KEY] || (stored.profile && manualFormFromProfile(stored.profile));
+  const data = restoredManualData(stored);
   if (data) populateManualForm(data);
 }
 
@@ -943,7 +1020,7 @@ $("saveLocalBtn").addEventListener("click", async () => {
 $("loadLocalBtn").addEventListener("click", async () => {
   try {
     const stored = await chrome.storage.local.get([MANUAL_STORAGE_KEY, "profile"]);
-    const data = stored[MANUAL_STORAGE_KEY] || (stored.profile && manualFormFromProfile(stored.profile));
+    const data = restoredManualData(stored);
     if (!data) return message("没有找到本地保存的数据。", true, "manual-status");
     populateManualForm(data);
     message("已读取本地数据。", false, "manual-status");
@@ -1010,5 +1087,5 @@ const completeCoverage = parseText("教育经历\n学校：某大学\n专业：�
 console.assert(completeCoverage.education[0].start === "2023-09-01" && completeCoverage.education[0].end === "2027-06-30");
 console.assert(completeCoverage.internships.length === 2 && completeCoverage.projects.length === 1 && completeCoverage.awards[0].date === "2025-04-01");
 setupRepeatableForms();
-load();
-loadManualForm();
+const popupReady = Promise.all([load(), loadManualForm()]);
+popupReady.then(async () => { const tab = await activeTab(); if (tab?.id != null) await showPageAction(tab.id); }).catch(() => {});

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>分拆年月重渲染回归</title>
+<style>body{font:16px system-ui;padding:24px}[class*=Select-container]{display:inline-block;width:100px;margin:4px}input{width:80px;height:28px}.sd-Menu-container{position:fixed;top:20px;left:20px;background:white;border:1px solid} .sd-Menu-content-item{padding:4px;cursor:pointer}</style>
+<h1>分拆年月重渲染回归</h1>
+<section><h2>工作经历</h2><div id="rows"></div></section>
+<section><h2>获奖经历</h2><div class="apply-fields"><div class="apply-field"><div class="title-date">获奖时间</div><div class="date_info" id="awardDate"></div></div><div class="apply-field"><div class="title-name">获奖项</div><input value="测试奖项"></div></div></section>
+<section><h2>求职意向</h2><label>期望月薪(税前)<select id="salary"><option value="">请选择</option><option>10001～15000</option><option>15001～20000</option></select></label></section>
+<pre id="result">运行中…</pre>
+<script>
+  const part = (value, placeholder) => `<label class="sd-Input-container-abc sd-Select-container-def"><span class="sd-Input-display-value">${value}</span><input class="sd-Input-input" placeholder="${value ? '' : placeholder}"></label>`;
+  const row = (company, start) => `<div class="apply-fields"><div class="apply-field"><div class="title-date">起止时间</div><div class="month-range-select date_info">${part(start[0], '年')}${part(start[1], '月')}-${part('', '年')}${part('', '月')}</div></div><div class="apply-field string_info"><div class="title-company">公司名称</div><input value="${company}"></div></div>`;
+  document.getElementById('rows').innerHTML = row('甲公司', ['2023','9']) + row('乙公司', ['','1']);
+  document.getElementById('awardDate').innerHTML = part('', '') + part('', '');
+  let selectedControl;
+  const protectedParts = new WeakSet([...document.querySelectorAll('.date_info input')].filter(input => input.parentElement.querySelector('span').textContent));
+  let existingValueWrites = 0;
+  document.addEventListener('click', event => {
+    const input = event.target.closest('[class*=Select-container] input');
+    if (input) {
+      document.querySelector('.sd-Menu-container')?.remove();
+      selectedControl = input;
+      const controls = [...input.closest('.date_info').querySelectorAll('input')];
+      const values = controls.indexOf(input) % 2 ? Array.from({length:12},(_,i)=>String(i+1)) : ['2023','2024','2025','2026'];
+      const popup = document.createElement('div');
+      popup.className = 'sd-Menu-container';
+      popup.innerHTML = values.map(value=>`<div class="sd-Menu-content-item">${value}</div>`).join('');
+      document.body.append(popup);
+    }
+    const option = event.target.closest('.sd-Menu-content-item');
+    if (option) {
+      if (protectedParts.has(selectedControl)) existingValueWrites++;
+      selectedControl.parentElement.querySelector('span').textContent = option.textContent;
+      const parts = [...selectedControl.closest('.date_info').querySelectorAll('input')];
+      const selectedIndex = parts.indexOf(selectedControl);
+      if (selectedIndex % 2 === 0 && !parts[selectedIndex + 1].parentElement.querySelector('span').textContent) parts[selectedIndex + 1].parentElement.querySelector('span').textContent = '1';
+      const replacement = selectedControl.cloneNode();
+      replacement.placeholder = '';
+      selectedControl.replaceWith(replacement);
+      option.parentElement.remove();
+    }
+  });
+  globalThis.__RESUME_AUTOFILL_TEST__ = true;
+</script>
+<script src="../content.js?v=protocol-98-date-focus-container"></script>
+<script>
+  (async()=>{
+    const profile = {jobIntent:{expectedSalary:'10-15K'},work:[{company:'甲公司',start:'2023-09',end:'2025-08'},{company:'乙公司',start:'2024-01',end:'2026-06'}],awards:[{name:'测试奖项',date:'2025-08'}]};
+    const report = await globalThis.__resumeAutofillTest.fill(profile,{onlyEmpty:true,deferChoices:true});
+    const values = [...document.querySelectorAll('.date_info')].map(group=>[...group.querySelectorAll('.sd-Input-display-value')].map(el=>el.textContent));
+    const ok = document.getElementById('salary').value === '10001～15000' && existingValueWrites === 0 && JSON.stringify(values)===JSON.stringify([['2023','9','2025','8'],['2024','1','2026','6'],['2025','8']]);
+    document.getElementById('result').textContent = `${ok?'PASS':'FAIL'} 分拆年月重渲染、已有开始日期与两行结束日期\n${JSON.stringify({values,diagnostics:report.diagnostics.structuredAttempts.map(({label,row,reason,choice})=>({label,row,reason,choice}))},null,2)}`;
+  })().catch(error=>{document.getElementById('result').textContent=`FAIL ${error.message}`;});
+</script>
+</html>

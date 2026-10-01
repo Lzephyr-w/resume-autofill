@@ -9,7 +9,7 @@ const manifest = JSON.parse(fs.readFileSync(require.resolve("../manifest.json"),
 const profileHelpers = source.slice(0, source.indexOf("function findValue"));
 const { cleanProfile } = Function(`${profileHelpers}; return { cleanProfile };`)();
 const helpers = source.slice(source.indexOf("function fieldLabel"), source.indexOf("const missingLocalValue"));
-const { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions, isCascadeField, cascadeCandidateAssignments, searchableCascadeAssignments, searchableSelectorAssignments, locationSearchHint } = Function(`${helpers}; return { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions, isCascadeField, cascadeCandidateAssignments, searchableCascadeAssignments, searchableSelectorAssignments, locationSearchHint };`)();
+const { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions, isCascadeField, cascadeCandidateAssignments, searchableCascadeAssignments, searchableSelectorAssignments, locationSearchHint, profileSources, semanticTextField } = Function(`${helpers}; return { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOptions, hasProfileContext, localCandidate, localCandidateAssignments, retryFieldKeys, cascadeChildOptions, isCascadeField, cascadeCandidateAssignments, searchableCascadeAssignments, searchableSelectorAssignments, locationSearchHint, profileSources, semanticTextField };`)();
 
 const result = missingFieldLabels(["民族", "期望工作城市"], [{ label: "期望工作城市" }]);
 assert.deepEqual(result, { unresolved: ["期望工作城市"], unavailable: ["民族"] });
@@ -20,6 +20,15 @@ assert.equal(cleanProfile({ birthDate: "2004-10" }).birthDate, "2004-10-01");
 assert.equal(cleanProfile({ birthDate: "2004年2月" }).birthDate, "2004-02-01");
 assert.equal(cleanProfile({ birthDate: "2004-10-02" }).birthDate, "2004-10-02");
 assert.equal(cleanProfile({ education: [{ "受教育类型": "统招全日制" }] }).education[0].training, "统招全日制");
+const manualProfileSource = source.slice(source.indexOf("function manualProfileFromForm"), source.indexOf("function manualFormFromProfile"));
+const manualProfileFromForm = Function("repeatRowsFromData", "skillsFromText", "cleanProfile", `${manualProfileSource}; return manualProfileFromForm;`)(
+  (data, group) => data[group] || [], () => [], cleanProfile
+);
+assert.equal(manualProfileFromForm({ certificates: [{ name: "证书甲", score: "95", description: "独立说明" }] }).certificates[0].description, "独立说明");
+assert.equal(manualProfileFromForm({ certificates: [{ name: "证书乙", score: "90" }] }).certificates[0].description, "成绩：90");
+const restoreSource = source.slice(source.indexOf("function restoredManualData"), source.indexOf("async function saveManualProfile"));
+const restoredManualData = Function("MANUAL_STORAGE_KEY", `${restoreSource}; return restoredManualData;`)("applicationFormData");
+assert.deepEqual(restoredManualData({ applicationFormData: { certificates: [{ name: "证书甲" }, { name: "证书乙" }] }, profile: { certificates: [{ name: "证书乙", description: "乙说明" }] } }).certificates.map((row) => row.description || ""), ["", "乙说明"]);
 assert.equal(uniqueEmptyFields([{ key: "page::工作地点::text::0", label: "工作地点", module: "", repeatIndex: 0 }, { key: "page::工作地点::text::1", label: "工作地点", module: "", repeatIndex: 0 }]).length, 2);
 assert.deepEqual(uniqueEmptyFields([undefined, { key: "city", label: "期望城市" }]), [{ key: "city", label: "期望城市" }]);
 assert.deepEqual(uniqueEmptyFields(), []);
@@ -40,6 +49,8 @@ assert.equal(localCandidate({ label: "期望从事行业", options: ["制造业"
 assert.equal(localCandidate({ label: "期望从事行业", options: ["制造业", "互联网/电子商务"] }, { jobIntent: { industry: "互联网行业" } }), "互联网/电子商务");
 assert.equal(localCandidate({ label: "期望从事职业", options: ["Java开发工程师", "Web前端开发工程师"] }, { jobIntent: { occupation: "前端工程" } }), "Web前端开发工程师");
 assert.equal(localCandidate({ label: "期望月薪(税前)", options: ["2001～4000", "8001～10000"] }, candidateProfile), "2001～4000");
+assert.equal(localCandidate({ label: "期望月薪(税前)", options: ["8001～10000", "10001～15000", "15001～25000"] }, { jobIntent: { expectedSalary: "10-15K" } }), "10001～15000");
+assert.equal(localCandidate({ label: "期望月薪(税前)", options: ["8001～10000", "10001～15000", "15001～25000"] }, { jobIntent: { expectedSalary: "10-20K" } }), "");
 assert.equal(localCandidate({ label: "工作地点", module: "工作经历", repeatIndex: 1, options: ["广州", "深圳"] }, candidateProfile), "深圳");
 assert.equal(aiFieldContext({ label: "工作地点", module: "", repeatIndex: 0, occurrence: 1 }, candidateProfile).experience.location, "深圳市");
 assert.equal(locationSearchHint({ label: "工作地点", module: "工作经历", repeatIndex: 0 }, { work: [{ location: "广东省", company: "广州市示例公司" }] }), "广州市");
@@ -70,9 +81,6 @@ assert.deepEqual([...retryFieldKeys([{ key: "city", optionSource: "popup", optio
 assert.deepEqual([...retryFieldKeys([undefined, { key: "city", optionSource: "popup", options: [] }], 1)], ["city"]);
 assert.deepEqual([...retryFieldKeys(undefined, 1)], []);
 assert.deepEqual([...retryFieldKeys([], 0)], []);
-const choiceStepSource = source.slice(source.indexOf("const choiceStep ="), source.indexOf("const awardChoice ="));
-const { choiceStep } = Function(`${choiceStepSource}; return { choiceStep };`)();
-assert.doesNotThrow(() => choiceStep(null, "年"));
 const rankOptionSource = contentSource.slice(contentSource.indexOf("const rankOption ="), contentSource.indexOf("const awardLevel ="));
 const { rankOption } = Function(`const clean = (value) => String(value || "").trim(); ${rankOptionSource}; return { rankOption };`)();
 assert.equal(rankOption("15%", ["前10%", "前20%", "前30%"]), "前20%");
@@ -107,19 +115,14 @@ const phoenixLabel = {};
 const phoenixTargetsRow = { className: "list-item-container list-item-container-two", querySelector: (selector) => selector.includes("icon-container") ? listIcon : phoenixLabel };
 assert.deepEqual(selectionTargets({ closest: (selector) => selector.includes("list-item-container") ? phoenixTargetsRow : null }), [listIcon, phoenixLabel, phoenixTargetsRow]);
 assert.doesNotMatch(source, /forceMatch/);
-assert.match(source, /body: JSON\.stringify\(\{ profile, fields: aiFields \}\)/);
-assert.match(source, /const liveFields = fieldsWithLiveOptions\(scannedFields\)/);
 assert.match(source, /cascade-parent-selected/);
 assert.match(source, /keepOpen: true/);
 assert.match(source, /for \(const initial of cascadeAssignments\)/);
 assert.match(source, /level <= 6/);
 assert.match(source, /keys: \[assignment\.key\], keepOpen: true/);
-assert.match(source, /const sourceValue = field\?\.profileContext\?\.sourceValue/);
-assert.match(source, /\["ai-no-assignment", "not-a-page-option", "candidate-not-read", "options-unavailable"\]/);
 assert.match(source, /chrome\.scripting\.executeScript/);
-assert.match(source, /CONTENT_MESSAGE_SUFFIX = "_V95"/);
+assert.equal(source.match(/CONTENT_MESSAGE_SUFFIX = "_V(\d+)"/)[1], contentSource.match(/CONTENT_PROTOCOL = (\d+)/)[1]);
 assert.match(contentSource, /__resumeAutofillContentProtocol/);
-assert.match(contentSource, /CONTENT_PROTOCOL = 95/);
 assert.match(source, /"受教育类型"/);
 assert.match(backgroundSource, /type: "mousePressed", x, y, button: "left", buttons: 1/);
 assert.match(contentSource, /rect\.width > 0 && rect\.height > 0/);
@@ -157,7 +160,6 @@ assert.match(contentSource, /waitFor\(selectionChanged, 1500\)/);
 assert.match(contentSource, /!isLocationPicker/);
 assert.match(contentSource, /area-city-not-found/);
 assert.match(contentSource, /trace\.area = \{ protocol: CONTENT_PROTOCOL/);
-assert.match(source, /地区协议 V\$\{area\.protocol/);
 assert.match(source, /locationSearchHint/);
 assert.match(contentSource, /chooseOptions\.locationHint/);
 assert.match(contentSource, /const companyHint/);
@@ -200,7 +202,6 @@ assert.match(contentSource, /plainPhoenixConfirm = !!phoenixSelectionCart && \/�
 assert.match(contentSource, /plain-trusted-industry/);
 assert.doesNotMatch(contentSource, /phoenixIndustry|phoenixNationality/);
 assert.match(contentSource, /result\?\.clicked && \(!changed \|\| await waitFor\(changed, 150\)\)/);
-assert.match(contentSource, /confirmClick: trace\?\.confirmClick/);
 assert.match(contentSource, /"项目职务": \["职务", "项目角色", "角色"\]/);
 assert.match(contentSource, /"项目职责": \["职责", "项目中职责", "个人工作"\]/);
 assert.doesNotMatch(contentSource, /\["项目职责", "role"\]/);
@@ -224,7 +225,6 @@ assert.match(contentSource, /semantic\.length \? semantic : leaves/);
 assert.doesNotMatch(contentSource, /setSearchValue\(sourceSearch, sourceValue\)/);
 assert.match(source, /childOptionsUpdated/);
 assert.match(source, /confirmedValue/);
-assert.match(contentSource, /popupFor\(liveDateControl\(\), false\)/);
 assert.match(contentSource, /popupRoots\(\)\.some\(\(popup\) => popup === el \|\| popup\.contains\(el\)\)/);
 assert.match(contentSource, /const day = sourceDay \|\| "01"/);
 assert.match(contentSource, /if \(!candidate\) return null/);
@@ -242,7 +242,7 @@ assert.match(contentSource, /let calendarPanel = panelFor\(calendar\)/);
 assert.match(contentSource, /const dayNode = dayCell\?\.querySelector/);
 assert.match(contentSource, /const commitCalendarInput = async/);
 assert.match(contentSource, /input\[class\*='calendar-input'\]/);
-assert.match(contentSource, /calendarInputScope = hasDayCells && \(calendarPanel\.closest/);
+assert.match(contentSource, /calendarInputScope = hasDayCells \? \(calendarPanel\.closest/);
 assert.match(contentSource, /const hasDayCells = \[\.\.\.calendar\.querySelectorAll/);
 assert.match(contentSource, /yearButton\(\)\?\.click\(\)/);
 assert.match(contentSource, /if \(monthNode\) monthNode\.click\(\);/);
@@ -251,10 +251,79 @@ assert.match(contentSource, /dateValueMatches\(liveDateControl\(\), value\)/);
 assert.match(mockSource, /phoenix-rerender/);
 assert.match(contentSource, /normalize\(fieldTitle\(el\)\) === normalize\(label\)/);
 assert.match(contentSource, /label === "成绩排名"/);
-assert.match(source, /协议 \$\{picker\.protocol \? `V\$\{picker\.protocol\}` : "旧版"\}/);
 assert.ok(manifest.permissions.includes("scripting"));
 assert.ok(manifest.permissions.includes("debugger"));
 assert.match(backgroundSource, /chrome\.debugger\.attach/);
 assert.match(backgroundSource, /Input\.dispatchMouseEvent/);
 assert.match(backgroundSource, /sender\.id !== chrome\.runtime\.id/);
 console.log("PASS popup diagnostics");
+
+assert.equal(semanticTextField({ type: "text", isChoice: false, options: [] }), true);
+assert.equal(semanticTextField({ type: "text", isChoice: true, options: [] }), false);
+assert.deepEqual(profileSources({ module: "教育经历", repeatIndex: 1 }, { education: [{ major: "A" }, { major: "B" }] }), [{ path: "education[1].major", value: "B" }]);
+assert.deepEqual(profileSources({ module: "工作经历", repeatIndex: 0, rowAnchor: { value: "陌生公司" } }, { work: [{ company: "A", title: "B" }] }), []);
+const separatedExperienceProfile = { separateInternships: true, work: [], internships: [{ company: "实习公司", title: "实习岗位" }], experiences: [{ company: "实习公司", title: "实习岗位" }] };
+assert.deepEqual(profileSources({ module: "工作经历", repeatIndex: 0 }, separatedExperienceProfile), []);
+assert.deepEqual(aiFieldContext({ label: "职位名称", module: "工作经历", repeatIndex: 0 }, separatedExperienceProfile), {});
+assert.equal(profileSources({ module: "实习经历", repeatIndex: 0 }, separatedExperienceProfile)[0].path, "internships[0].company");
+assert.deepEqual(profileSources({ module: "证书", repeatIndex: 0, rowAnchor: { value: "页面已有其他证书" } }, { certificates: [{ name: "CET-4", date: "2024-06" }] }), []);
+assert.deepEqual(profileSources({ module: "英语能力", repeatIndex: 0, rowAnchor: { value: "CET-6" } }, { certificates: [{ name: "CET-4" }, { name: "CET-6", date: "2025-06" }] }).map(({ path }) => path), ["certificates[1].name", "certificates[1].date"]);
+const splitCertificates = { separateEnglishCertificates: true, certificates: [{ name: "CET-4" }, { name: "技术资格证", date: "2025-06" }] };
+assert.deepEqual(profileSources({ module: "证书", repeatIndex: 0 }, splitCertificates).map(({ path }) => path), ["certificates[1].name", "certificates[1].date"]);
+assert.deepEqual(profileSources({ module: "英语能力", repeatIndex: 0 }, splitCertificates).map(({ path }) => path), ["certificates[0].name"]);
+assert.deepEqual(profileSources({ module: "证书", repeatIndex: 0 }, { separateEnglishCertificates: true, certificates: [{ name: "CET-4", date: "2024-06" }] }), []);
+assert.doesNotMatch(contentSource, /assignment\.index != null/);
+assert.doesNotMatch(source, /field\.index === assignment\.index/);
+assert.doesNotMatch(source, /JSON\.stringify\(\{ profile, fields/);
+assert.match(source, /body: JSON\.stringify\(\{ fields: payload \}\)/);
+console.log("PASS generic text eligibility, repeat isolation and private payload");
+
+(async () => {
+  let pageHandler;
+  const opened = [];
+  Function("chrome", backgroundSource)({
+    action: { onClicked: { addListener() {} } },
+    sidePanel: { open: async ({ tabId }) => opened.push(tabId) },
+    runtime: { id: "test-extension", onMessage: { addListener: (handler) => { pageHandler = handler; } },
+      sendMessage: async (request) => { assert.deepEqual(request, { type: "RESUME_AUTOFILL_PAGE_RUN_V98", tabId: 42 }); return { status: "confirmed" }; } }
+  });
+  const request = { type: "RESUME_AUTOFILL_PAGE_FILL_V98" };
+  assert.equal(pageHandler(request, { id: "foreign", tab: { id: 42 }, frameId: 0 }, () => {}), undefined);
+  assert.equal(pageHandler(request, { id: "test-extension", tab: { id: 42 }, frameId: 1 }, () => {}), undefined);
+  const relayed = await new Promise((resolve) => assert.equal(pageHandler(request, { id: "test-extension", tab: { id: 42 }, frameId: 0 }, resolve), true));
+  assert.deepEqual(opened, [42]);
+  assert.equal(relayed.status, "confirmed");
+  console.log("PASS page fill bridge: sender/frame boundary and explicit target tab");
+  let payload;
+  let returned;
+  const semanticMatch = Function("fetch", "proxyUrl", `${helpers}; return semanticMatch;`)(async (_url, request) => {
+    payload = JSON.parse(request.body);
+    return { ok: true, json: async () => ({ assignments: returned }) };
+  }, "http://127.0.0.1:8787");
+  const profile = { email: "private@example.test", phone: "13800138000", education: [{ major: "甲专业" }, { major: "乙专业" }], customFields: { apiKey: "must-not-send" } };
+  const fields = [
+    { key: "contact", type: "email", label: "接收通知的地址", autocomplete: "email" },
+    { key: "major-2", type: "text", label: "主修方向", module: "教育经历", repeatIndex: 1 }
+  ];
+  returned = [
+    { key: "contact", profilePath: "email", value: "invented@example.test", confidence: 0.95 },
+    { key: "major-2", profilePath: "education[1].major", value: "模型生成内容", confidence: 0.95 }
+  ];
+  assert.deepEqual((await semanticMatch(fields, profile)).assignments.map(({ value }) => value), [profile.email, "乙专业"]);
+  assert.deepEqual(payload.fields[0].sources, [{ path: "email" }]);
+  assert.ok(!JSON.stringify(payload).includes(profile.email) && !JSON.stringify(payload).includes(profile.phone));
+  assert.ok(!JSON.stringify(payload).includes("must-not-send"));
+  for (const item of [
+    { key: "expired", index: 0, profilePath: "email", confidence: 0.95 },
+    { key: "contact", profilePath: "phone", confidence: 0.95 },
+    { key: "major-2", profilePath: "education[0].major", confidence: 0.95 },
+    { key: "contact", profilePath: "email", confidence: "NaN" },
+    { key: "contact", profilePath: "email", confidence: 2 }
+  ]) {
+    returned = [item];
+    assert.deepEqual((await semanticMatch(fields, profile)).assignments, []);
+  }
+  returned = Array(2).fill({ key: "contact", profilePath: "email", confidence: 0.95 });
+  assert.deepEqual((await semanticMatch(fields, profile)).assignments, []);
+  console.log("PASS client AI boundary: local text, private payload, stale keys, wrong rows, duplicate mappings");
+})().catch((error) => { console.error(error); process.exitCode = 1; });

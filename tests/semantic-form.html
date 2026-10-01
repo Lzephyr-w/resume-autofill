@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>通用字段安全回归</title>
+<style>body { font: 16px system-ui; padding: 24px; } section, label { display: block; margin: 12px; } input { min-height: 28px; } .pass { color: green; } .fail { color: red; }</style>
+<h1>通用字段安全回归</h1>
+<form>
+  <section><h2>基本资料</h2>
+    <label>如何称呼你<input id="person" autocomplete="name" data-label="姓名"></label>
+    <label>接收通知的地址<input id="contact" type="email" autocomplete="email"></label>
+    <label>保留资料<input id="protected" value="原有资料"></label>
+    <label>搜索职位<input id="search" type="search"></label><label>申请选项<input id="choiceSearch" type="search" role="combobox" readonly></label>
+    <input id="proxy" aria-hidden="true"><input id="disabled" disabled>
+    <label>异步校验<input id="rejected"></label>
+  </section>
+  <section><h2>项目经历</h2><div id="rows">
+    <div><label>承担的角色<input></label></div>
+    <div><label>承担的角色<input></label></div>
+  </div></section>
+  <section><h2>重复定位</h2><label>会被重建<input id="rebuilt"></label></section>
+  <div class="applyFormModuleWrapper"><div>教育经历请填写教育经历</div><div class="applyFormModuleWrapper-right">
+    <div class="apply-form-array-card"><div class="register-form-group-wrapper"><div class="ud-formily-item"><div class="ud-formily-item-label"><span>学校名称</span></div><div class="ud-formily-item-control"><input id="formilySchool1"></div></div><div class="ud-formily-item"><div class="ud-formily-item-label"><span>专业</span></div><div class="ud-formily-item-control"><input id="formilyMajor1"></div></div><div class="ud-formily-item"><div class="ud-formily-item-label"><span>起止时间</span></div><div class="generic-date-range"><input id="rangeStart" type="date"><input id="rangeEnd" type="date"></div></div></div></div>
+    <div class="apply-form-array-card"><div class="register-form-group-wrapper"><div class="ud-formily-item"><div class="ud-formily-item-label"><span>学校名称</span></div><div class="ud-formily-item-control"><input id="formilySchool2"></div></div><div class="ud-formily-item"><div class="ud-formily-item-label"><span>专业</span></div><div class="ud-formily-item-control"><input id="formilyMajor2"></div></div></div></div>
+  </div></div>
+</form>
+<pre id="result">运行中…</pre>
+<script>globalThis.__RESUME_AUTOFILL_TEST__ = true; globalThis.chrome = { runtime: { sendMessage: async () => ({}), onMessage: { addListener() {}, removeListener() {} } } };</script>
+<script src="../content.js?v=protocol-98-row-scope"></script>
+<script>globalThis.__initialResumeApi = globalThis.__resumeAutofillTest;</script>
+<script src="../content.js?v=protocol-98-row-scope"></script>
+<script>
+(async () => {
+  const api = globalThis.__resumeAutofillTest;
+  const checks = [];
+  const check = (name, ok) => checks.push([name, !!ok]);
+  check("同协议热注入更新", api !== globalThis.__initialResumeApi);
+  api.showPageAction();
+  const actionPanel = document.getElementById("resume-autofill-page-action");
+  const oldActionButton = actionPanel.querySelector("button");
+  actionPanel.querySelector('[role="status"]').textContent = "已有诊断";
+  api.showPageAction();
+  check("热注入更新按钮连接并保留诊断", actionPanel.querySelector("button") !== oldActionButton && actionPanel.querySelector('[role="status"]').textContent === "已有诊断");
+  actionPanel.remove();
+  document.body.insertAdjacentHTML("beforeend", '<label>异步候选字段<div class="generic-auto-complete-container"><div><div><input id="delayedSuggestion"></div></div></div></label>');
+  const delayedInput = document.getElementById("delayedSuggestion");
+  delayedInput.addEventListener("input", () => setTimeout(() => {
+    const popup = document.createElement("div"); popup.setAttribute("role", "listbox"); popup.style.cssText = "position:absolute;left:30px;top:30px;background:white";
+    const option = document.createElement("div"); option.setAttribute("role", "option"); option.textContent = "测试候选";
+    option.onclick = () => { delayedInput.value = "测试候选"; popup.remove(); };
+    popup.append(option); document.body.append(popup);
+  }, 300), { once: true });
+  const delayedField = api.formSchema().find((item) => item.id === "delayedSuggestion");
+  const delayedResult = await api.applyAssignments([{ key: delayedField.key, value: "测试候选", confidence: 1 }]);
+  check("嵌套自动补全等待实际异步候选", delayedResult.filled === 1 && !document.querySelector('[role="listbox"]'));
+  const missingPhone = await api.fill({ phone: "13900000000" }, { onlyEmpty: true });
+  check("控件类型不能单独构成字段匹配", missingPhone.filled === 0 && [...document.querySelectorAll("input")].every((input) => input.value !== "13900000000"));
+  document.body.insertAdjacentHTML("beforeend", '<section><h2>求职意向</h2><label>期望工作地点<input id="intentCity"></label></section><section><h2>实习经历</h2><label>没有实习经历<input id="noInternship" type="checkbox" checked></label><div><label>公司名称<input id="internCompany"></label><label>职位名称<input></label></div></section>');
+  const internshipFill = await api.fill({ internships: [{ company: "实习公司", title: "前端实习生" }] }, { onlyEmpty: true });
+  check("有实习来源时取消无实习勾选并填写记录", !document.getElementById("noInternship").checked && document.getElementById("internCompany").value === "实习公司" && internshipFill.filled >= 1);
+  check("缺失行字段不能借用其他模块", api.rowField("公司名称", 0, "工作地点", "实习经历") === null);
+  document.body.insertAdjacentHTML("beforeend", '<section><h2>获奖经历</h2><div class="generic-array-card"><label>获奖名称<input value="测试奖项"></label><label>获奖时间<input placeholder="YYYY" value="2025"></label></div></section>');
+  const yearOnly = await api.fill({ awards: [{ name: "测试奖项", date: "2025-04" }] }, { onlyEmpty: true });
+  check("仅年份控件按页面精度回读", yearOnly.diagnostics.structuredAttempts.some((item) => item.label === "获奖时间" && item.dateMatch?.confirmed));
+  if (!checks[checks.length - 1][1]) document.getElementById("result").dataset.yearDiagnostic = JSON.stringify(yearOnly.diagnostics.structuredAttempts);
+  document.body.insertAdjacentHTML("beforeend", '<label>选中选项<div class="generic-select-selector"><div class="generic-select-selector-content"><span class="generic-select-selector-selectItem">已有选项</span><div class="generic-select-selector-search"><input id="selectedChoice" role="combobox" readonly></div></div></div></label>');
+  document.body.insertAdjacentHTML("beforeend", '<label>多选标签<div class="generic-select"><span class="generic-select-selection__choice__content">已有城市</span><input id="selectedTags" role="combobox" readonly></div></label>');
+  document.body.insertAdjacentHTML("beforeend", '<label>树形多选标签<div class="generic-select"><span class="generic-select__selector__tag">已有城市</span><input id="selectedTreeTag" role="combobox" readonly></div></label>');
+  document.body.insertAdjacentHTML("beforeend", '<label>已填学校<div id="schoolCombobox" class="generic-select-combobox" role="combobox"><input class="generic-select-search" value="测试学校"></div></label>');
+  document.body.insertAdjacentHTML("beforeend", '<label>意向城市<input id="checkboxCity" role="combobox" readonly aria-controls="checkboxChoices"></label><div id="checkboxChoices" class="generic-dropdown" hidden style="position:fixed;left:20px;top:20px"><div class="generic-tree__node"><label><input type="checkbox"></label><div>深圳</div></div><div class="generic-tree__node"><label><input type="checkbox"></label><div>上海</div></div></div>');
+  document.getElementById("checkboxCity").addEventListener("click", () => { document.getElementById("checkboxChoices").hidden = false; });
+  document.getElementById("checkboxChoices").addEventListener("change", (event) => { if (event.target.checked) document.getElementById("checkboxCity").value = event.target.closest(".generic-tree__node").textContent; });
+  const schema = api.formSchema();
+  const field = (id) => schema.find((item) => item.id === id);
+  const assignment = (item, value) => ({ key: item.key, index: item.index, label: item.label, value, confidence: 1 });
+  const checkboxOptions = await api.liveOptions([field("checkboxCity").key]);
+  const checkboxFill = await api.applyAssignments([assignment(field("checkboxCity"), "深圳")]);
+  check("仅复选框候选的弹层可发现并确认", JSON.stringify(checkboxOptions).includes('"深圳"') && checkboxFill.filled === 1 && document.getElementById("checkboxCity").value === "深圳");
+  document.getElementById("checkboxChoices").hidden = true;
+  check("过滤搜索/隐藏代理/禁用字段", !schema.some((item) => ["search", "proxy", "disabled"].includes(item.id)));
+  check("采集标准与 data 语义", field("person").autocomplete === "name" && field("person").data["data-label"] === "姓名");
+  const formily = [field("formilyMajor1"), field("formilyMajor2")];
+  const formilyDetails = formily.map(({id,label,module,repeatIndex})=>({id,label,module,repeatIndex}));
+  check("外层表单标题与重复行", formily.every((item) => item.label === "专业" && /教育经历/.test(item.module)) && formily[0].repeatIndex === 0 && formily[1].repeatIndex === 1);
+  check("下拉搜索仍是申请字段", !!field("choiceSearch"));
+  const selectedResult = await api.applyAssignments([assignment(field("selectedChoice"), "覆盖")]);
+  check("下拉选中显示保护", selectedResult.filled === 0 && selectedResult.diagnostics.some((item) => item.reason === "page-value-protected"));
+  const tagsResult = await api.applyAssignments([assignment(field("selectedTags"), "覆盖")]);
+  check("多选标签回读保护", tagsResult.filled === 0 && tagsResult.diagnostics.some((item) => item.reason === "page-value-protected"));
+  const treeTagResult = await api.applyAssignments([assignment(field("selectedTreeTag"), "覆盖")]);
+  check("树形多选标签回读保护", treeTagResult.filled === 0 && treeTagResult.diagnostics.some((item) => item.reason === "page-value-protected"));
+  const schoolProtected = await api.applyAssignments([assignment(field("schoolCombobox"), "覆盖")]);
+  check("外层 combobox 回读内部实际文本", field("schoolCombobox").currentValue === "测试学校" && schoolProtected.filled === 0);
+  check("双完整日期定位区分起止", api.rowField("学校名称", 0, "开始时间", "教育背景")?.id === "rangeStart" && api.rowField("学校名称", 0, "结束时间", "教育背景")?.id === "rangeEnd");
+  document.querySelector(".apply-form-array-card").insertAdjacentHTML("beforeend", '<label>学历类型*<input id="requiredTraining"></label><label>学历*<input id="requiredDegree"></label>');
+  check("必填星号不混淆学历与学历类型", api.rowField("学校名称", 0, "学历", "教育背景")?.id === "requiredDegree");
+  const formilyResult = await api.applyAssignments([assignment(formily[0], "甲专业"), assignment(formily[1], "乙专业")]);
+  check("外层标题配对不串行", formilyResult.filled === 2 && document.getElementById("formilyMajor1").value === "甲专业" && document.getElementById("formilyMajor2").value === "乙专业");
+  const before = document.getElementById("person");
+  before.replaceWith(before.cloneNode());
+  const filled = await api.applyAssignments([assignment(field("contact"), "mock@example.test"), assignment(field("person"), "测试称呼")]);
+  check("普通文本正确配对并唯一重定位", filled.filled === 2 && document.getElementById("person").value === "测试称呼" && document.getElementById("contact").value === "mock@example.test");
+  const protectedResult = await api.applyAssignments([assignment(field("protected"), "覆盖")]);
+  check("保护原值", protectedResult.filled === 0 && document.getElementById("protected").value === "原有资料");
+  const stale = await api.applyAssignments([{ ...assignment(field("person"), "错误"), key: "expired", index: field("protected").index }]);
+  check("失效键不能按 index 写入", stale.filled === 0 && stale.diagnostics[0].reason === "field-not-found");
+  const repeated = schema.filter((item) => item.module === "项目经历");
+  const rows = document.getElementById("rows");
+  rows.prepend(rows.lastElementChild);
+  await api.applyAssignments([assignment(repeated[0], "甲角色"), assignment(repeated[1], "乙角色")]);
+  check("行换序后仍写入原记录", rows.children[0].querySelector("input").value === "乙角色" && rows.children[1].querySelector("input").value === "甲角色");
+  rows.innerHTML = '<div><label>承担的角色<input></label></div>';
+  const removed = await api.applyAssignments([assignment(repeated[1], "串行")]);
+  check("删除重建行后旧键失效", removed.filled === 0 && rows.querySelector("input").value === "");
+  const rebuilt = document.getElementById("rebuilt");
+  rebuilt.parentElement.insertAdjacentHTML("beforeend", '<input id="rebuilt">');
+  rebuilt.replaceWith(rebuilt.cloneNode());
+  const ambiguous = await api.applyAssignments([assignment(field("rebuilt"), "歧义")]);
+  check("重定位有歧义就跳过", ambiguous.filled === 0 && [...document.querySelectorAll("#rebuilt")].every((input) => !input.value));
+  document.getElementById("rejected").addEventListener("blur", (event) => { setTimeout(() => { event.target.value = ""; }, 30); });
+  const rejected = await api.applyAssignments([assignment(field("rejected"), "拒绝的内容")]);
+  check("失焦后回读拒绝伪成功", rejected.filled === 0);
+  rows.innerHTML = '<div><label>项目名称<input value="单框项目"></label><label>描述<textarea id="singleProjectDescription"></textarea></label></div>';
+  await api.fill({ projects: [{ name: "单框项目", description: "项目简介 负责实现功能", responsibilities: "独立承担开发" }] }, { onlyEmpty: true });
+  check("单个描述框不被项目职责抢占", document.getElementById("singleProjectDescription").value === "项目简介 负责实现功能\n独立承担开发");
+  document.body.insertAdjacentHTML("beforeend", '<section><h2>语言能力</h2><div><label>语言类型<input value="英语"></label><label>掌握程度<select><option selected>商务会话</option></select></label></div></section>');
+  const languageProtected = await api.fill({ languages: [{ language: "英语", proficiency: "熟练" }] }, { onlyEmpty: true });
+  check("语言候选映射与已有值回读一致", languageProtected.diagnostics.structuredAttempts.some((item) => item.label === "掌握程度" && item.matchesSource === true));
+  document.body.insertAdjacentHTML("beforeend", '<section><h2>获奖经历</h2><div><label>获奖名称<input value="校内奖项"></label><label>获奖级别<input value="院校级"></label></div></section>');
+  const awardProtected = await api.fill({ awards: [{ name: "测试奖项", date: "2025" }, { name: "校内奖项", level: "校级" }] }, { onlyEmpty: true });
+  check("获奖候选映射与已有值回读一致", awardProtected.diagnostics.structuredAttempts.some((item) => item.label === "获奖级别" && item.row === 2 && item.matchesSource === true));
+  document.body.insertAdjacentHTML("beforeend", '<section><h2>证书</h2><div class="generic-array-card"><label>证书名称<input value="证书甲"></label><label>成绩<input id="certificateScore1"></label><label>描述<textarea id="certificateDescription1"></textarea></label></div><div class="generic-array-card"><label>证书名称<input value="证书乙"></label><label>描述<textarea id="certificateDescription2"></textarea></label></div></section>');
+  const certificateFill = await api.fill({ certificates: [{ name: "证书甲", description: "甲说明" }, { name: "证书乙", description: "乙说明" }] }, { onlyEmpty: true });
+  check("证书简短描述标题仍按行配对", document.getElementById("certificateDescription1").value === "甲说明" && document.getElementById("certificateDescription2").value === "乙说明");
+  check("证书描述不能误写成成绩", document.getElementById("certificateScore1").value === "");
+  check("应填空字段与回读成功按目标去重计数", certificateFill.diagnostics.expectedEmpty === 2 && certificateFill.diagnostics.confirmedEmpty === 2);
+  document.body.insertAdjacentHTML("beforeend", '<div><div>证书请展示证书</div><div><div class="generic-array-card"><div class="generic-array-card-content"><div class="ud-formily-item"><div class="ud-formily-item-label">证书名称*</div><div class="ud-formily-item-control"><input id="nestedCertificate1"></div></div><div class="ud-formily-item"><div class="ud-formily-item-label">描述</div><div class="ud-formily-item-control"><textarea id="nestedCertificateDescription1"></textarea></div></div></div><div class="generic-array-card"><div class="generic-array-card-content"><div class="ud-formily-item"><div class="ud-formily-item-label">证书名称*</div><div class="ud-formily-item-control"><input id="nestedCertificate2"></div></div><div class="ud-formily-item"><div class="ud-formily-item-label">描述</div><div class="ud-formily-item-control"><textarea id="nestedCertificateDescription2"></textarea></div></div></div></div></div>');
+  const nestedCertificateFields = api.formSchema().filter((item) => /^nestedCertificate/.test(item.id));
+  check("证书字段标题不能覆盖模块或重复行", nestedCertificateFields.every((item) => item.module === "证书请展示证书") && nestedCertificateFields.find((item) => item.id === "nestedCertificateDescription2").repeatIndex === 1);
+  document.getElementById("certificateDescription1").textContent = "成绩500分";
+  check("字段现有内容不能成为另一个字段的标签", api.rowField("证书名称", 0, "分数", "证书")?.id === "certificateScore1" && !api.formSchema().find((item) => item.id === "certificateDescription1").label.includes("500"));
+  document.body.insertAdjacentHTML("beforeend", '<section><h2>个人信息</h2><label>个人证件<select id="personalDocument"><option value="">请选择</option><option>身份证</option><option>护照</option></select></label></section><section><h2>竞赛经历</h2><div class="generic-array-card"><label>竞赛名称<input id="competitionName"></label><label>描述<textarea id="competitionDescription"></textarea></label></div></section>');
+  const competitionFill = await api.fill({ customFields: { 证件类型: "护照" }, awards: [{ name: "竞赛甲", description: "甲说明" }] }, { onlyEmpty: true });
+  check("个人证件选项来自页面且竞赛记录按模块填充", document.getElementById("personalDocument").value === "护照" && document.getElementById("competitionName").value === "竞赛甲" && document.getElementById("competitionDescription").value === "甲说明" && competitionFill.filled >= 3);
+  document.body.insertAdjacentHTML("beforeend", '<div class="generic-formily-item"><div class="generic-formily-item-label">个人证件</div><div><span class="generic-select"><input role="combobox" readonly value="身份证"></span><input id="documentNumber"></div></div>');
+  const documentFill = await api.fill({ customFields: { 证件号码: "123456" } }, { onlyEmpty: true });
+  check("复合证件字段只写号码输入框", documentFill.filled === 1 && document.getElementById("documentNumber").value === "123456");
+  const failed = checks.filter(([, ok]) => !ok);
+  document.getElementById("result").className = failed.length ? "fail" : "pass";
+  document.getElementById("result").textContent = `${failed.length ? "FAIL" : "PASS"}\n${checks.map(([name, ok]) => `${ok ? "✓" : "✗"} ${name}`).join("\n")}\n${failed.length ? JSON.stringify(formilyDetails) : ""}`;
+})().catch((error) => { document.getElementById("result").textContent = `FAIL ${error.stack}`; });
+</script>
+</html>

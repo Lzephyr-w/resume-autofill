@@ -42,7 +42,7 @@
     const input = (label, id, value = "") => item(label, `<input id="${id}" value="${value}">`);
     const phoenixInput = (label, id) => item(label, `<div class="phoenix-input"><input id="${id}" class="phoenix-input__input" placeholder="请输入"></div>`);
     const month = (label, id) => phoenix
-      ? item(label, `<div class="phoenix-select phoenix-select--editable"><input id="${id}" class="phoenix-select__input" value=""></div>`)
+      ? item(label, `<div class="phoenix-select phoenix-select--editable"><input id="${id}" class="phoenix-select__input${rerenderPhoenix ? ' phoenix-select__input--unText' : ''}" value=""></div>`)
       : item(label, `<input id="${id}" type="month">`);
     const stringInfo = (label, id, placeholder) => `<div class="apply-field string_info"><div class="apply-field-label">${label}</div><div class="sd-Dropdown-container"><label class="sd-Input-container sd-Select-container"><span class="sd-Input-display-value"></span><input id="${id}" data-sd-autocomplete class="sd-Input-value" placeholder="${placeholder}"><span></span></label><span></span></div></div>`;
     const mokaAutocomplete = (label, id) => item(label, `<div class="phoenix-input"><input id="${id}" data-moka-autocomplete class="phoenix-input__input" placeholder="请输入"></div>`);
@@ -68,7 +68,7 @@
       : kind === "project" ? input("项目名称", `${kind}Name${index}`) + (phoenix ? item("项目职责", `<textarea id="${kind}Role${index}"></textarea>`) : input("职务", `${kind}Role${index}`)) + month("开始时间", `${kind}Start${index}`) + month("结束时间", `${kind}End${index}`) + item("项目描述", `<textarea id="${kind}Description${index}"></textarea>`)
       : kind === "cadre" ? dateRange("起止时间", kind, index) + input("职务", `${kind}Position${index}`) + item("工作职责", `<textarea id="${kind}Duty${index}"></textarea>`)
       : kind === "skill" ? input("技能名称", `${kind}Name${index}`) + select("掌握程度", `${kind}Proficiency${index}`, ["了解", "一般", "熟练", "精通"], "", component) + input("使用时间总计", `${kind}Duration${index}`) + item("技能描述", `<textarea id="${kind}Description${index}"></textarea>`)
-      : kind === "language" ? input("语言类型", `${kind}Type${index}`) + select("精通程度", `${kind}Proficiency${index}`, ["入门", "日常会话", "商务会话", "无障碍沟通", "母语"], "", component) + select("听说", `${kind}Speaking${index}`, ["一般", "良好", "熟练", "精通"], "", component) + select("读写", `${kind}Reading${index}`, ["一般", "良好", "熟练", "精通"], "", component)
+      : kind === "language" ? input("语言类型", `${kind}Type${index}`) + select("精通程度", `${kind}Proficiency${index}`, ["入门", "日常会话", "商务会话", "无障碍沟通", "母语"]) + select("听说", `${kind}Speaking${index}`, ["一般", "良好", "熟练", "精通"], "", component) + select("读写", `${kind}Reading${index}`, ["一般", "良好", "熟练", "精通"], "", component)
       : kind === "certificate" ? input(phoenix ? "英语证书名称" : "证书名称", `${kind}Name${index}`, phoenix && index === 1 ? "CET-6" : "") + input("成绩", `${kind}Score${index}`, phoenix && index === 1 ? "510" : "")
       : yearMonth("获奖时间", kind, index) + input("获奖项", `${kind}Name${index}`)
     )}</div>`;
@@ -108,12 +108,22 @@
      else occupationControl.setAttribute("aria-disabled", "true");
       industryControl?.addEventListener("change", updateOccupation);
      }
+    let focusedDate;
+    document.addEventListener("mousedown", (event) => {
+      if (event.target.matches(".phoenix-select__input")) event.target.dataset.pressed = "true";
+    });
+    document.addEventListener("focusin", (event) => {
+      if (event.target.matches(".phoenix-select__input")) focusedDate = event.target;
+      if (rerenderPhoenix && event.target.matches(".phoenix-select__input")) {
+        event.target.parentElement.insertAdjacentHTML("beforeend", '<div role="listbox" data-unrelated-popup>无关候选</div>');
+      }
+    });
     document.addEventListener("click", (event) => {
        const fullDateInput = fullDatePhoenix && event.target.closest("#birthDate");
-       if (fullDateInput && !document.querySelector("[data-full-date-panel]")) document.body.insertAdjacentHTML("beforeend", `<div class="phoenix-calendar-date-panel" role="dialog" data-full-date-panel data-year="2026" data-month="9" style="position:fixed;left:20px;top:20px;background:white"><a class="prev-year phoenix-calendar-prev-year-btn">«</a><a class="prev-month phoenix-calendar-prev-month-btn">‹</a><span class="phoenix-calendar-ym-select"><span class="phoenix-calendar-year-select" data-calendar-year>2026年</span><span class="phoenix-calendar-month-select" data-calendar-month>9月</span></span><a class="next-month phoenix-calendar-next-month-btn">›</a><a class="next-year phoenix-calendar-next-year-btn">»</a><table role="grid"><tbody><tr>${Array.from({ length: 31 }, (_, index) => `<td role="gridcell"><div class="phoenix-calendar-date">${index + 1}</div></td>`).join("")}</tr></tbody></table></div>`);
+       if (fullDateInput && !document.querySelector("[data-full-date-panel]")) document.body.insertAdjacentHTML("beforeend", `<div class="phoenix-calendar-date-panel" role="dialog" data-full-date-panel data-year="2026" data-month="9" style="position:fixed;left:20px;top:20px;background:white"><a class="prev-year phoenix-calendar-prev-year-btn">«</a><a class="prev-month phoenix-calendar-prev-month-btn">‹</a><span class="phoenix-calendar-ym-select"><span class="phoenix-calendar-year-select" data-calendar-year>2026年</span><span class="phoenix-calendar-month-select" data-calendar-month>9月</span></span><a class="next-month phoenix-calendar-next-month-btn">›</a><a class="next-year phoenix-calendar-next-year-btn">»</a><table role="grid"><tbody><tr>${Array.from({ length: 31 }, (_, index) => `<td><div class="phoenix-calendar-date">${index + 1}</div></td>`).join("")}</tr></tbody></table></div>`);
        const fullDateNav = event.target.closest("[data-full-date-panel] .prev-year, [data-full-date-panel] .next-year, [data-full-date-panel] .prev-month, [data-full-date-panel] .next-month");
         if (fullDateNav) { const panel = fullDateNav.closest("[data-full-date-panel]"); const yearStep = fullDateNav.className.includes("year") ? (fullDateNav.className.includes("prev") ? -1 : 1) : 0; const monthStep = fullDateNav.className.includes("month") ? (fullDateNav.className.includes("prev") ? -1 : 1) : 0; panel.dataset.year = String(Number(panel.dataset.year) + yearStep); panel.dataset.month = String(Number(panel.dataset.month) + monthStep); panel.querySelector("[data-calendar-year]").textContent = `${panel.dataset.year}年`; panel.querySelector("[data-calendar-month]").textContent = `${panel.dataset.month}月`; panel.replaceWith(panel.cloneNode(true)); }
-       const fullDateDay = event.target.closest("[data-full-date-panel] [role=gridcell]");
+       const fullDateDay = event.target.closest("[data-full-date-panel] td");
        if (fullDateDay) { const panel = fullDateDay.closest("[data-full-date-panel]"); const target = document.querySelector("#birthDate"); target.value = `${panel.dataset.year}-${String(panel.dataset.month).padStart(2, "0")}-${String(fullDateDay.textContent).padStart(2, "0")}`; target.dispatchEvent(new Event("change", { bubbles: true })); panel.remove(); }
        const atsxAwardDate = event.target.closest('.atsx-date-picker input[placeholder="YYYY"]');
        if (atsxAwardDate && !document.querySelector(`[data-atsx-award-for="${atsxAwardDate.dataset.cy}"]`)) {
@@ -151,23 +161,24 @@
        if (combobox?.nextElementSibling?.getAttribute("role") === "listbox") { const list = combobox.nextElementSibling; const plainConfirm = combobox.closest(".phoenix-select, .mock-cascade")?.querySelector(".plain-confirm"); list.hidden = !list.hidden; if (plainConfirm) plainConfirm.hidden = list.hidden; combobox.setAttribute("aria-expanded", String(!list.hidden)); }
        if (combobox?.hasAttribute("data-midas-tree")) { const tree = combobox.nextElementSibling; tree.hidden = !tree.hidden; combobox.setAttribute("aria-expanded", String(!tree.hidden)); }
       const picker = phoenix && event.target.closest(".phoenix-select__input");
-      if (picker && !document.querySelector("[data-month-panel]")) {
+      if (picker && (!rerenderPhoenix || picker.dataset.pressed === "true") && !document.querySelector("[data-month-panel]")) {
+        delete picker.dataset.pressed;
         document.querySelector("[data-unrelated-popup]")?.remove();
-        if (yearTitlePhoenix) document.body.insertAdjacentHTML("beforeend", `<div data-month-header style="position:fixed;left:20px;top:20px;background:white"><button data-year-title type="button">2026 年</button></div><div class="mock-floating-layer" data-month-panel data-for="${picker.id}" data-year="2026" style="position:fixed;left:20px;top:50px;background:white">${'<div class="mock-date-depth">'.repeat(9)}<div role="grid">${Array.from({length:12},(_,i)=>`<span data-month>${i+1} 月</span>`).join("")}</div>${'</div>'.repeat(9)}</div>`);
-        else document.body.insertAdjacentHTML("beforeend", `<div class="phoenix-calendar-month-panel" data-month-panel data-for="${picker.id}" data-year="2026" style="position:fixed;left:20px;top:20px;background:white"><a class="phoenix-calendar-month-panel-prev-year-btn"></a><a class="phoenix-calendar-month-panel-year-select" data-year-title>2026</a><a class="phoenix-calendar-month-panel-next-year-btn"></a><div class="mock-panel-body"><div role="grid">${Array.from({length:12},(_,i)=>`<div role="gridcell" data-month>${i+1}月</div>`).join("")}</div></div></div>`);
+        if (yearTitlePhoenix) document.body.insertAdjacentHTML("beforeend", `<div data-month-header style="position:fixed;left:20px;top:20px;background:white"><button data-year-title type="button">2026 年</button></div><div class="mock-floating-layer" data-month-panel data-for="${yearTitlePhoenix ? focusedDate?.id : picker.id}" data-year="2026" style="position:fixed;left:20px;top:50px;background:white">${'<div class="mock-date-depth">'.repeat(9)}<div role="grid">${Array.from({length:12},(_,i)=>`<span data-month>${String(i+1).padStart(2, "0")} 月</span>`).join("")}</div>${'</div>'.repeat(9)}</div>`);
+        else setTimeout(() => document.body.insertAdjacentHTML("beforeend", `<div class="phoenix-calendar-month-panel" data-month-panel data-for="${yearTitlePhoenix ? focusedDate?.id : picker.id}" data-year="2026" style="position:fixed;left:20px;top:20px;background:white"><a class="phoenix-calendar-month-panel-prev-year-btn"></a><a class="phoenix-calendar-month-panel-year-select" data-year-title>2026</a><a class="phoenix-calendar-month-panel-next-year-btn"></a><div class="mock-panel-body"><div role="grid">${Array.from({length:12},(_,i)=>`<div role="gridcell" data-month>${i+1}月</div>`).join("")}</div></div></div>`), 180);
       }
       const panelButton = event.target.closest(".phoenix-calendar-month-panel-prev-year-btn, .phoenix-calendar-month-panel-next-year-btn");
        if (panelButton) { const panel = panelButton.closest("[data-month-panel]"); panel.dataset.year = String(Number(panel.dataset.year) + (panelButton.className.includes("prev") ? -1 : 1)); panel.querySelector(".phoenix-calendar-month-panel-year-select").textContent = panel.dataset.year; if (rerenderPhoenix) panel.replaceWith(panel.cloneNode(true)); }
       const yearTitle = yearTitlePhoenix && event.target.closest("[data-year-title]");
       if (yearTitle) document.querySelector("[data-month-panel]").querySelector("[role=grid]").innerHTML = Array.from({length:11},(_,i)=>`<span data-year-option>${2020+i} 年</span>`).join("");
       const yearOption = event.target.closest("[data-year-option]");
-      if (yearOption) { const panel = yearOption.closest("[data-month-panel]"); panel.dataset.year = yearOption.textContent.replace(/\D/g, ""); document.querySelector("[data-year-title]").textContent = `${panel.dataset.year} 年`; panel.querySelector("[role=grid]").innerHTML = Array.from({length:12},(_,i)=>`<span data-month>${i+1} 月</span>`).join(""); }
+      if (yearOption) { const panel = yearOption.closest("[data-month-panel]"); panel.dataset.year = yearOption.textContent.replace(/\D/g, ""); document.querySelector("[data-year-title]").textContent = `${panel.dataset.year} 年`; panel.querySelector("[role=grid]").innerHTML = Array.from({length:12},(_,i)=>`<span data-month>${String(i+1).padStart(2, "0")} 月</span>`).join(""); }
       const monthCell = event.target.closest("[data-month]");
        if (monthCell) { const panel = monthCell.closest("[data-month-panel]"); let target = document.getElementById(panel.dataset.for); if (rerenderPhoenix) { const replacement = target.cloneNode(true); target.replaceWith(replacement); target = replacement; } target.value = `${panel.dataset.year}-${String(parseInt(monthCell.textContent, 10)).padStart(2, "0")}`; target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true })); panel.remove(); document.querySelector("[data-month-header]")?.remove(); }
       const mokaOption = event.target.closest("[data-moka-option]");
-      if (mokaOption) { if (mokaOption.dataset.pointerReady) { const control = document.getElementById(mokaOption.dataset.for); control.value = mokaOption.textContent.trim(); control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } mokaOption.parentElement.remove(); return; }
+      if (mokaOption) { if (mokaOption.dataset.pointerReady) { const control = document.getElementById(mokaOption.dataset.for); control.dataset.accepted = "true"; control.value = mokaOption.textContent.trim(); control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } mokaOption.parentElement.remove(); return; }
       const sdOption = event.target.closest("[data-sd-option]");
-      if (sdOption) { if (sdOption.dataset.pointerReady) { const control = document.getElementById(sdOption.dataset.for); control.value = sdOption.textContent.trim(); control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } sdOption.closest("[data-sd-popup]")?.remove(); return; }
+      if (sdOption) { if (sdOption.dataset.pointerReady) { const control = document.getElementById(sdOption.dataset.for); control.value = sdOption.textContent.trim(); control.dataset.accepted = "true"; control.parentElement.querySelector(".sd-Input-display-value").textContent = control.value; control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } sdOption.closest("[data-sd-popup]")?.remove(); return; }
        const option = event.target.closest("[role=option], .plain-choice");
        if (option) { const list = option.closest("[role=listbox]"); if (option.hasAttribute("data-generic-parent")) { const search = list.querySelector(".mock-cascade-search"); const children = option.closest(".mock-generic-cascade").dataset.children.split("|"); list.replaceChildren(search, ...children.map((text) => { const child = document.createElement("div"); child.setAttribute("role", "option"); child.dataset.genericLeaf = ""; child.textContent = text; return child; })); } else if (option.hasAttribute("data-generic-leaf")) list.dataset.pending = option.textContent.trim(); else if (option.hasAttribute("data-rerender-parent") && !event.target.closest("[data-select-marker]")) list.innerHTML = '<div role="option" data-rerender-final><span class="mock-selection-icon" data-select-marker><svg class="area-icon-RadioUnchecked"></svg></span><span>深圳市</span><span class="mock-arrow"></span></div>'; else if (option.hasAttribute("data-rerender-final")) list.dataset.pending = option.textContent.trim(); else if (option.hasAttribute("data-cascade-parent")) list.replaceChildren(Object.assign(document.createElement("div"), { role: "option", textContent: "广州市" })); else { const optionValue = option.textContent; const applyOption = () => { const control = list?.previousElementSibling; if (control?.matches("input")) { control.value = optionValue; control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } else if (control) { control.querySelector(".ant-select-selection-item").textContent = optionValue; control.dispatchEvent(new Event("input", { bubbles: true })); control.dispatchEvent(new Event("change", { bubbles: true })); } if (list && !option.matches("[data-search-result]")) list.hidden = true; }; component ? setTimeout(applyOption, 220) : applyOption(); } }
        const treeItem = event.target.closest("[role=treeitem]");
@@ -176,6 +187,11 @@
       const add = event.target.closest("[data-add]");
       if (add) { const kind = add.dataset.add; const host = document.querySelector(`#${kind}Rows`); host.insertAdjacentHTML("beforeend", row(kind, host.children.length + 1)); }
     });
+    const openSd = (sd) => {
+      const host = sd.closest(".sd-Dropdown-container");
+      if (!host?.querySelector("[data-sd-popup]")) host?.insertAdjacentHTML("beforeend", `<div data-sd-popup class="sd-Select-dropdown" style="position:fixed;left:20px;top:20px;background:white"><div class="sd-Menu-content-item" data-sd-option data-for="${sd.id}">${sd.id === "nestedSchool" ? "测试大学" : "计算机"}</div></div>`);
+    };
+    document.addEventListener("focusin", (event) => { const sd = event.target.closest("input[data-sd-autocomplete]"); if (sd) openSd(sd); });
     document.addEventListener("input", (event) => {
       const search = event.target.closest(".mock-select-search");
        if (search) { const result = search.parentElement.querySelector("[data-search-result]"); result.textContent = search.value.trim() === "互联网" ? "互联网/电子商务" : search.value; result.dataset.searchUsed = "true"; }
@@ -184,9 +200,9 @@
       const cascadeSearch = event.target.closest(".mock-cascade-search");
       if (cascadeSearch) (globalThis.__cascadeSearches ||= []).push(cascadeSearch.value);
       const moka = event.target.closest("input[data-moka-autocomplete]");
-      if (moka) { document.querySelector("[data-moka-popup]")?.remove(); document.body.insertAdjacentHTML("beforeend", `<div data-moka-popup class="phoenix-autocomplete-popup" style="position:fixed;left:20px;top:20px;background:white"><div role="option" data-moka-option data-for="${moka.id}">${moka.id === "mokaSchool" ? "测试大学" : "计算机"}</div></div>`); }
+      if (moka && document.activeElement === moka) { document.querySelector("[data-moka-popup]")?.remove(); document.body.insertAdjacentHTML("beforeend", `<div data-moka-popup class="phoenix-autocomplete-popup" style="position:fixed;left:20px;top:20px;background:white"><div role="option" data-moka-option data-for="${moka.id}">${moka.id === "mokaSchool" ? "测试大学" : "计算机"}</div></div>`); }
       const sd = event.target.closest("input[data-sd-autocomplete]");
-      if (sd) { document.querySelector("[data-sd-popup]")?.remove(); document.body.insertAdjacentHTML("beforeend", `<div data-sd-popup class="sd-Select-dropdown" style="position:fixed;left:20px;top:20px;background:white"><div class="sd-Menu-content-item" data-sd-option data-for="${sd.id}">${sd.id === "nestedSchool" ? "测试大学" : "计算机"}</div></div>`); }
+      if (sd) openSd(sd);
       const atsxSchool = event.target.closest("input.atsx-select-search__field");
       if (atsxSchool) { document.querySelector("[data-atsx-school-popup]")?.remove(); document.body.insertAdjacentHTML("beforeend", '<div data-atsx-school-popup class="atsx-select-dropdown" style="position:fixed"><div role="option" data-atsx-school-option>测试大学</div></div>'); }
     });
@@ -204,7 +220,7 @@
     document.querySelector("#form").addEventListener("change", (event) => changed.add(`change:${event.target.id || event.target.name}`));
     globalThis.__RESUME_AUTOFILL_TEST__ = true;
   </script>
-  <script src="../content.js?v=protocol-95-phoenix-current-confirm"></script>
+  <script src="../content.js?v=protocol-98-popup-owner-2"></script>
   <script>
     (async () => {
       if (fullDatePhoenix) {
@@ -306,6 +322,9 @@
         return;
       }
       if (moka) {
+        document.getElementById("nestedSchool").focus();
+        document.getElementById("nestedMajor").focus();
+        document.body.insertAdjacentHTML("beforeend", '<div role="listbox" style="position:fixed;left:800px;top:20px"><div role="option">无关候选</div></div>');
         const schema = globalThis.__resumeAutofillTest.formSchema();
         const school = schema.find((field) => field.id === "mokaSchool");
         const major = schema.find((field) => field.id === "mokaMajor");
@@ -321,7 +340,7 @@
           { key: plainSchool.key, index: plainSchool.index, label: plainSchool.label, value: "普通大学", confidence: 1 },
           { key: plainMajor.key, index: plainMajor.index, label: plainMajor.label, value: "普通专业", confidence: 1 }
         ]);
-        const passed = report.filled === 6 && document.querySelector("#mokaSchool").value === "测试大学" && document.querySelector("#mokaMajor").value === "计算机" && document.querySelector("#nestedSchool").value === "测试大学" && document.querySelector("#nestedMajor").value === "计算机" && document.querySelector("#plainPhoenixSchool").value === "普通大学" && document.querySelector("#plainPhoenixMajor").value === "普通专业";
+        const passed = document.getElementById("mokaSchool").dataset.accepted === "true" && document.getElementById("mokaMajor").dataset.accepted === "true" && report.filled === 6 && document.querySelector("#mokaSchool").value === "测试大学" && document.querySelector("#mokaMajor").value === "计算机" && document.querySelector("#nestedSchool").dataset.accepted === "true" && document.querySelector("#nestedMajor").dataset.accepted === "true" && !document.querySelector("[data-sd-popup]") && document.querySelector("#plainPhoenixSchool").value === "普通大学" && document.querySelector("#plainPhoenixMajor").value === "普通专业";
         const output = document.querySelector("#result");
         output.className = passed ? "pass" : "fail";
         output.textContent = `${passed ? "PASS" : "FAIL"} ${ui}\n${JSON.stringify(report, null, 2)}`;
@@ -332,9 +351,6 @@
           work: [{ company: "日期定位公司", start: "2025-08", end: "2026-01", salary: "3500", location: "广州" }],
           projects: [{ name: "年份标题项目", start: "2025-06", end: "2027-06" }, { name: "开始日期失败项目", start: "2019-06", end: "2028-06" }]
         };
-        document.querySelector("#workStart1").value = "2026-08";
-        document.querySelector("#projectStart1").value = "2026-06";
-        document.querySelector("#projectEnd1").value = "2026-06";
         document.body.insertAdjacentHTML("beforeend", '<div role="listbox" data-unrelated-popup style="position:fixed"><div role="option">残留候选</div></div>');
         const report = await globalThis.__resumeAutofillTest.fill(profile, { onlyEmpty: true });
         const workStart = document.querySelector("#workStart1")?.value;
@@ -434,7 +450,7 @@
         ["组件下拉校验事件", !component || changed.has("change:intentIndustry")],
         ["组件弹层搜索", !component || document.querySelector("[data-search-result]")?.dataset.searchUsed === "true"],
          ["string_info 选择器外观仍按文本填充", !component || nestedEducation?.filled === 2 && text("nestedSchool") === "测试大学" && text("nestedMajor") === "计算机"],
-         ["Phoenix 学校专业候选确认", !component || mokaEducation?.filled === 2 && text("mokaSchool") === "测试大学" && text("mokaMajor") === "计算机"],
+         ["Phoenix 学校专业候选确认", !component || mokaEducation?.filled === 2 && document.getElementById("mokaSchool").dataset.accepted === "true" && document.getElementById("mokaMajor").dataset.accepted === "true" && text("mokaSchool") === "测试大学" && text("mokaMajor") === "计算机"],
         ["Phoenix 确认控件", !component || document.querySelector(".plain-confirm")?.dataset.confirmed === "true"],
         ["级联父子候选与最终确认", !component || cascadeParent?.diagnostics?.[0]?.reason === "cascade-parent-selected" && cascadeOptions.includes("广州市") && cascadeFinal?.filled === 1 && text("cascadeCity") === "广州市"],
         ["搜索型级联分层选择", !component || searchCascadeParent?.diagnostics?.[0]?.reason === "cascade-parent-selected" && searchCascadeChildren?.find((field) => field.key === searchCascadeField.key)?.options?.includes("广州市") && searchCascade?.filled === 1 && text("searchCascadeCity") === "广州市" && document.querySelector(".mock-location-search")?.value !== "广东省广州市"],
@@ -451,10 +467,12 @@
         ["技能扩行", document.querySelectorAll("#skillRows .repeat-row").length === 2 && text("skillName1") === "Vue3" && text("skillName2") === "React" && text("skillDescription2") === "用于组件化开发"],
         ["技能等级候选映射", text("skillProficiency1") === "熟练" && text("skillProficiency2") === "熟练"],
         ["语言候选与扩行", document.querySelectorAll("#languageRows .repeat-row").length === 2 && text("languageType2") === "日语" && text("languageProficiency1") === "商务会话" && text("languageSpeaking1") === "熟练" && text("languageReading1") === "熟练" && text("languageReading2") === "一般"],
-         ["英语能力独立扩行并按名称对齐", document.querySelectorAll("#certificateRows .repeat-row").length === 2 && text("certificateName1") === "CET-6" && text("certificateName2") === "CET-4" && text("genericCertificateName1") === ""],
+         ["证书扩行及已有名称对齐", document.querySelectorAll("#certificateRows .repeat-row").length === 2 && text("certificateName1") === (phoenix ? "CET-6" : "CET-4") && text("certificateName2") === (phoenix ? "CET-4" : "CET-6") && text("genericCertificateName1") === (phoenix ? "CET-4" : "")],
         ["重复字段第二条日期", document.querySelectorAll("#awardRows .repeat-row").length === 3 && text("awardName2") === "二等奖" && text("awardYear1") === "2025" && text("awardMonth1") === "4" && text("awardYear2") === "2025" && text("awardMonth2") === "6" && text("awardName3") === "三等奖" && text("awardYear3") === "2024" && text("awardMonth3") === "" && document.querySelectorAll("#workRows .repeat-row").length === 2],
         ["自我描述", text("selfEvaluation") === profile.extras.selfEvaluation]
       ];
+      report.diagnostics.autocomplete = mokaEducation;
+      report.diagnostics.rerender = { parent: rerenderParent, options: rerenderOptions, final: rerenderFinal };
       const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
       const output = document.querySelector("#result");
       output.className = failed.length ? "fail" : "pass";

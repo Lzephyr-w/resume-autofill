@@ -13,6 +13,8 @@
 
 更新代码后，需要在 `chrome://extensions` 中重新加载插件；下次填充会热注入当前脚本，无需刷新已有内容的目标网页。
 
+侧栏打开后，当前表单右下角会出现“简历助手：填充当前页面”。该按钮打开对应侧栏并复用 AI 填充流程，展开“填充诊断”可查看脱敏结果；本地代理重启后会从已保存配置重新连接。
+
 ## 数据与边界
 
 - 本地数据使用 `chrome.storage.local` 保存，导出文件为可读 JSON。
@@ -40,6 +42,11 @@ node .\resume-autofill\ai-proxy\server.js
 ## 本地回归
 
 ```powershell
+node tests/ai-proxy.test.js
+node tests/popup-diagnostics.test.js
+```
+
+```powershell
 cd .\resume-autofill
 python -m http.server 8765 --bind 127.0.0.1
 ```
@@ -52,7 +59,14 @@ python -m http.server 8765 --bind 127.0.0.1
 - `http://127.0.0.1:8765/tests/mock-form.html?ui=phoenix-year-title`
 - `http://127.0.0.1:8765/tests/mock-form.html?ui=phoenix-rerender`
 - `http://127.0.0.1:8765/tests/mock-form.html?ui=phoenix-misleading`
+- `http://127.0.0.1:8765/tests/mock-form.html?ui=phoenix-full-date`
 - `http://127.0.0.1:8765/tests/mock-form.html?ui=cascade`
 - `http://127.0.0.1:8765/tests/mock-form.html?ui=atsx`
 
 以上页面均显示 `PASS` 即通过；用例覆盖已有值保护、地区防串填、日期、单选、原生/自定义/Phoenix 下拉、通用多级候选、惰性候选、事件触发，以及工作、项目、干部、技能、语言、获奖的多条扩行。
+
+`http://127.0.0.1:8765/tests/mock-suite.html` 会顺序运行上述九种用例并显示汇总。
+`http://127.0.0.1:8765/tests/semantic-form.html` 覆盖普通文本配对、字段重建、失效键、重复行换序、歧义跳过与失焦回读。
+`http://127.0.0.1:8765/tests/split-date-form.html` 覆盖四个年月选择框、节点重建、已有开始日期保护和两条经历的结束日期确认。
+
+逐页实测、跳过项与修复历史见 [通用表单验收记录](docs/通用表单验收进度.md)。0.9.41 的验收记录已被后续真实页面反馈推翻；0.9.42 正重新复核思谋、vivo 和字节的证书、竞赛、实习、证件等字段，不能把旧记录视为最终通过。没有自动提交任何申请。更新扩展代码后需在 Chrome 中重载扩展；本地代理代码更新后需重启代理并重新连接配置。
