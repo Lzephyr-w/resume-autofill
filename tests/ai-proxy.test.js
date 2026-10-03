@@ -43,3 +43,14 @@ const fallbackMapping = { assignments: [{ key: "certificate", profilePath: "cert
 assert.equal(mappingResults(fallbackMapping, [certificateChoice])[0].reason, "fallback-option-not-source");
 assert.equal(mappingResults(fallbackMapping, [{ ...certificateChoice, sources: [{ path: "certificates[0].name", value: "其他" }] }])[0].reason, "accepted");
 console.log("PASS explicit source cannot become a generic fallback option");
+const awardChoice = { key: "award", label: "奖项名称", module: "获奖信息", isChoice: true,
+  options: ["国家奖学金", "国家励志奖学金", "校级一等奖学金", "其他"],
+  sources: [{ path: "awards[1].name", value: "优秀学生二等奖学金" }] };
+const awardMapping = { assignments: [{ key: "award", profilePath: "awards[1].name", value: "其他", confidence: 0.99 }] };
+assert.equal(mappingResults(awardMapping, [awardChoice])[0].reason, "accepted");
+assert.equal(mappingResults(awardMapping, [{ ...awardChoice, options: [...awardChoice.options, "优秀学生二等奖学金"] }])[0].reason, "fallback-option-not-source");
+assert.equal(mappingResults(awardMapping, [{ ...awardChoice, label: "获奖类型" }])[0].reason, "fallback-option-not-source");
+assert.equal(mappingResults({ assignments: [{ ...awardMapping.assignments[0], value: "无" }] }, [{ ...awardChoice, options: ["无"] }])[0].reason, "fallback-option-not-source");
+const contestChoice = { ...awardChoice, sources: [{ path: "awards[0].name", value: "广东省蓝桥杯大赛 Web 应用开发组二等奖" }], options: ["蓝桥杯全国软件和信息技术专业人才大赛"] };
+assert.equal(mappingResults({ assignments: [{ key: "award", profilePath: "awards[0].name", value: contestChoice.options[0], confidence: 0.99 }] }, [contestChoice])[0].reason, "accepted");
+console.log("PASS AI award aliases and scoped other option");

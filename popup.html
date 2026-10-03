@@ -51,6 +51,7 @@
           <label>籍贯<input id="nativePlace" type="text" placeholder="例如：浙江杭州"></label>
           <label>微信号<input id="wechat" type="text" placeholder="请输入微信号"></label>
           <label>民族<input id="nationality" type="text" placeholder="例如：汉族"></label>
+          <label>国家/地区<input id="countryRegion" type="text" autocomplete="country-name" placeholder="例如：中国"></label>
           <label>政治面貌<input id="politicalStatus" type="text" placeholder="例如：群众"></label>
           <label>现居住地<input id="currentResidence" type="text" placeholder="例如：广东省广州市"></label>
           <label>户口所在地<input id="householdRegistration" type="text" placeholder="例如：广东省汕头市"></label>
@@ -70,7 +71,9 @@
           <label>专业<input id="major" type="text" placeholder="例如：计算机科学与技术"></label>
           <label>入学时间<input id="educationStart" type="text" placeholder="例如：2021-09"></label>
           <label>毕业年份<input id="graduationYear" type="text" inputmode="numeric" placeholder="例如：2025"></label>
-          <label>GPA<input id="gpa" type="text" placeholder="例如：3.8/4.0 或 90/100"></label>
+          <label>GPA<input id="gpa" type="text" inputmode="decimal" placeholder="仅填绩点，例如：3.8"></label>
+          <label>GPA类型（满分制）<input id="gpaType" type="text" placeholder="例如：5分制"></label>
+          <label>成绩排名<input id="educationRank" type="text" placeholder="例如：前12%"></label>
           </div>
         </div>
       </section>
@@ -101,6 +104,7 @@
             <label>工作地点<input id="internLocation1" type="text" placeholder="例如：广州市"></label>
             <label>离职原因<input id="internReason1" type="text" placeholder="例如：实习结束"></label>
             <label class="wide">工作内容<textarea id="internContent1" placeholder="描述你的工作职责与成果…"></textarea></label>
+            <label class="wide">亮点/工作业绩<textarea id="internHighlights1" placeholder="描述你的工作亮点、业绩或量化成果…"></textarea></label>
           </div>
         </div>
       </section>

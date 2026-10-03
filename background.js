@@ -24,13 +24,13 @@ const trustedClick = async (tabId, x, y, plain = false) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === "RESUME_AUTOFILL_PAGE_FILL_V98" && sender.id === chrome.runtime.id && sender.tab?.id != null && sender.frameId === 0) {
+  if (message?.type === "RESUME_AUTOFILL_PAGE_FILL_V100" && sender.id === chrome.runtime.id && sender.tab?.id != null && sender.frameId === 0) {
     (async () => {
       await chrome.sidePanel.open({ tabId: sender.tab.id });
       // Opening a side panel is asynchronous; wait only for its message listener.
       for (let attempt = 0; attempt < 15; attempt++) {
         try {
-          const result = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_PAGE_RUN_V98", tabId: sender.tab.id });
+          const result = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_PAGE_RUN_V100", tabId: sender.tab.id });
           if (result) return result;
         } catch {}
         await new Promise((resolve) => setTimeout(resolve, 200));

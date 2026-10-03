@@ -14,6 +14,11 @@ const { missingFieldLabels, uniqueEmptyFields, aiFieldContext, fieldsWithLiveOpt
 const result = missingFieldLabels(["民族", "期望工作城市"], [{ label: "期望工作城市" }]);
 assert.deepEqual(result, { unresolved: ["期望工作城市"], unavailable: ["民族"] });
 assert.equal(cleanProfile({ awards: [{ name: "奖项", awardDate: "2025-06" }] }).awards[0].date, "2025-06");
+assert.deepEqual(profileSources({ label: '目标职位类别' }, { jobIntent: { occupation: '前端开发', industry: '互联网' }, phone: '13800138000' }), [{ path: 'jobIntent["occupation"]', value: '前端开发' }]);
+assert.deepEqual(profileSources({ label: '目标职位类别' }, { jobIntent: { industry: '互联网' } }), []);
+const linkedAwards = { awards: [{ name: '优秀学生二等奖学金', description: '学业优秀' }, { name: '算法杯二等奖', level: '省级', description: '算法竞赛' }] };
+assert.deepEqual(profileSources({ label: '获奖类型', module: '获奖信息', repeatIndex: 1 }, linkedAwards), [{ path: 'awards[1].name', value: '算法杯二等奖' }]);
+assert.deepEqual(profileSources({ label: '奖项名称', module: '获奖信息', repeatIndex: 1 }, linkedAwards), [{ path: 'awards[1].name', value: '算法杯二等奖' }]);
 assert.equal(cleanProfile({ workExperience: "1年" }).workExperience, "1年");
 assert.equal(cleanProfile({ age: 22 }).age, "22");
 assert.equal(cleanProfile({ birthDate: "2004-10" }).birthDate, "2004-10-01");
@@ -21,9 +26,46 @@ assert.equal(cleanProfile({ birthDate: "2004年2月" }).birthDate, "2004-02-01")
 assert.equal(cleanProfile({ birthDate: "2004-10-02" }).birthDate, "2004-10-02");
 assert.equal(cleanProfile({ education: [{ "受教育类型": "统招全日制" }] }).education[0].training, "统招全日制");
 const manualProfileSource = source.slice(source.indexOf("function manualProfileFromForm"), source.indexOf("function manualFormFromProfile"));
+const repeatConfigSource = source.slice(source.indexOf("const REPEAT_GROUPS"), source.indexOf("function prepareRepeatRow"));
+const repeatDataSource = source.slice(source.indexOf("function repeatRowsFromData"), source.indexOf("function collectManualForm"));
+const { REPEAT_GROUPS, repeatRowsFromData } = Function(`${repeatConfigSource}; ${repeatDataSource}; return { REPEAT_GROUPS, repeatRowsFromData };`)();
 const manualProfileFromForm = Function("repeatRowsFromData", "skillsFromText", "cleanProfile", `${manualProfileSource}; return manualProfileFromForm;`)(
-  (data, group) => data[group] || [], () => [], cleanProfile
+  repeatRowsFromData, () => [], cleanProfile
 );
+const manualFormSource = source.slice(source.indexOf("function manualFormFromProfile"), source.indexOf("function hasManualData"));
+const manualFormFromProfile = Function(`${manualFormSource}; return manualFormFromProfile;`)();
+const countryProfile = manualProfileFromForm(JSON.parse(JSON.stringify({ countryRegion: " 中国 ", nationality: "汉族" })));
+assert.equal(countryProfile.countryRegion, "中国");
+assert.equal(countryProfile.nationality, "汉族");
+assert.equal(manualFormFromProfile(countryProfile).countryRegion, "中国");
+assert.equal(cleanProfile({ nationality: "汉族" }).countryRegion, "");
+assert.deepEqual(profileSources({ module: "个人信息", autocomplete: "country-name" }, countryProfile), [{ path: "countryRegion", value: "中国" }]);
+for (const label of ["国家/地区", "国家地区", "国家（地区）", "Country/Region"]) {
+  assert.equal(aiFieldContext({ module: "个人信息", label }, countryProfile).sourceValue, "中国");
+  assert.equal(localCandidate({ module: "个人信息", label, options: ["中国", "美国"] }, countryProfile), "中国");
+}
+assert.equal(aiFieldContext({ module: "个人信息", label: "国家/地区" }, { nationality: "汉族" }).sourceValue, undefined);
+assert.deepEqual(REPEAT_GROUPS.educations.fields.find(([key]) => key === "rank"), ["rank", "educationRank"]);
+assert.deepEqual(REPEAT_GROUPS.educations.fields.find(([key]) => key === "gpaType"), ["gpaType", "gpaType"]);
+const scaleProfile = manualProfileFromForm({educations:[{school:"回归院校",gpa:"3.6",gpaType:"5分制",rank:"前20%"}]});
+assert.equal(scaleProfile.education[0].gpa,"3.6");
+assert.equal(manualFormFromProfile(scaleProfile).educations[0].gpaType,"5分制");
+assert.equal(scaleProfile.education[0].rank,"前20%");
+assert.equal(manualProfileFromForm(manualFormFromProfile({ education: [{ school: "回归院校", gpa: "3.7", rank: "12%" }] })).education[0].rank, "12%");
+const highlightRows = [
+  { company: "公司甲", title: "前端实习生", description: "开发页面", highlights: "加载时间缩短 30%\n交付 5 个页面" },
+  { company: "公司乙", title: "前端工程师", highlights: "优化组件" }
+];
+const highlightProfile = manualProfileFromForm(JSON.parse(JSON.stringify({ experiences: highlightRows })));
+assert.deepEqual(highlightProfile.experiences, highlightRows);
+assert.equal(highlightProfile.internships[0].highlights, highlightRows[0].highlights);
+assert.equal(highlightProfile.work[0].highlights, highlightRows[1].highlights);
+assert.deepEqual(manualFormFromProfile(highlightProfile).experiences, highlightRows);
+assert.equal(repeatRowsFromData({ internHighlights1: "旧格式业绩" }, "experiences")[0].highlights, "旧格式业绩");
+assert.equal(repeatRowsFromData({ internCompany1: "旧公司" }, "experiences")[0].highlights, "");
+const highlightsPrefix = REPEAT_GROUPS.experiences.fields.find(([key]) => key === "highlights")[1];
+assert.ok(fs.readFileSync(require.resolve("../popup.html"), "utf8").includes(`亮点/工作业绩<textarea id="${highlightsPrefix}1"`));
+assert.ok(profileSources({ module: "实习经历", repeatIndex: 0 }, highlightProfile).some(({ path, value }) => path === "internships[0].highlights" && value === highlightRows[0].highlights));
 assert.equal(manualProfileFromForm({ certificates: [{ name: "证书甲", score: "95", description: "独立说明" }] }).certificates[0].description, "独立说明");
 assert.equal(manualProfileFromForm({ certificates: [{ name: "证书乙", score: "90" }] }).certificates[0].description, "成绩：90");
 const restoreSource = source.slice(source.indexOf("function restoredManualData"), source.indexOf("async function saveManualProfile"));
@@ -89,6 +131,14 @@ const valueMatches = Function("normalize", "salaryRange", "dateParts", "rankOpti
   (value) => String(value || "").replace(/\s/g, ""), () => null, () => [], rankOption
 );
 assert.equal(valueMatches("TOP20%", "15%", "成绩排名"), true);
+assert.equal(valueMatches("基于工具", "基于工具 开发测试平台，构建查询流程。", "项目描述"), false);
+assert.equal(valueMatches("完整项目说明", "完整项目说明", "项目描述"), true);
+const projectPartsSource = contentSource.slice(contentSource.indexOf("const projectParts ="), contentSource.indexOf("const clickOption ="));
+const projectParts = Function(`${projectPartsSource}; return projectParts;`)();
+const fullDescription = "基于工具 开发测试平台，构建查询流程。\n链接：https://example.test/project";
+assert.deepEqual(projectParts({ description: fullDescription, responsibilities: "负责界面交互" }), { summary: fullDescription, responsibilities: "负责界面交互" });
+assert.equal(projectParts({ description: fullDescription }).summary, fullDescription);
+assert.deepEqual(projectParts({ description: "项目完整摘要\n项目职责：负责界面交互" }), { summary: "项目完整摘要", responsibilities: "项目职责：负责界面交互" });
 const projectFieldOverrideSource = contentSource.slice(contentSource.indexOf("const projectFieldOverride ="), contentSource.indexOf("const rowField ="));
 const projectFieldOverride = Function("controlSelector", "editable", "fieldTitle", "labelText", "normalize", `${projectFieldOverrideSource}; return projectFieldOverride;`)(
   "input, textarea", () => true, (control) => control.title, () => "", (value) => String(value || "").replace(/\s/g, "")
@@ -207,7 +257,6 @@ assert.match(contentSource, /"项目职责": \["职责", "项目中职责", "个
 assert.doesNotMatch(contentSource, /\["项目职责", "role"\]/);
 assert.match(contentSource, /label === "项目职责" \? row\?\.responsibilities \|\| parts\?\.responsibilities/);
 assert.match(contentSource, /reason: "language-type-not-confirmed"/);
-assert.match(contentSource, /if \(!multiSelector && committedControl/);
 assert.match(contentSource, /if \(!multiSelector\) restoreChoiceSearch\(control, trace\.before\);/);
 assert.match(contentSource, /trace\.restoreSkipped = "multi-selector"/);
 assert.match(contentSource, /const scanPopup = !control\.closest/);
@@ -225,14 +274,15 @@ assert.match(contentSource, /semantic\.length \? semantic : leaves/);
 assert.doesNotMatch(contentSource, /setSearchValue\(sourceSearch, sourceValue\)/);
 assert.match(source, /childOptionsUpdated/);
 assert.match(source, /confirmedValue/);
-assert.match(contentSource, /popupRoots\(\)\.some\(\(popup\) => popup === el \|\| popup\.contains\(el\)\)/);
+assert.match(contentSource, /const visibleCalendar = \(\) => popupRoots\(\)\.flatMap/);
+assert.match(contentSource, /const owner = popupRoots\(\)\.find\(\(popup\) => popup === grid \|\| popup\.contains\(grid\)\)/);
 assert.match(contentSource, /const day = sourceDay \|\| "01"/);
 assert.match(contentSource, /if \(!candidate\) return null/);
 assert.match(contentSource, /"英语能力"/);
 assert.match(contentSource, /const isEnglishCertificate =/);
 assert.match(contentSource, /const alignRows =/);
 assert.match(contentSource, /englishCertificates: englishCertificates\.length/);
-assert.match(contentSource, /dayNode\.click\(\)/);
+assert.match(contentSource, /await clickOption\(dayNode\)/);
 assert.match(contentSource, /visibleCalendar\(\) \|\| calendar/);
 assert.match(contentSource, /el\?\.closest\?\.\("div\.form\[id\]"\)/);
 assert.match(contentSource, /!\/学号\/\.test\(anchor\)/);
@@ -261,6 +311,12 @@ console.log("PASS popup diagnostics");
 assert.equal(semanticTextField({ type: "text", isChoice: false, options: [] }), true);
 assert.equal(semanticTextField({ type: "text", isChoice: true, options: [] }), false);
 assert.deepEqual(profileSources({ module: "教育经历", repeatIndex: 1 }, { education: [{ major: "A" }, { major: "B" }] }), [{ path: "education[1].major", value: "B" }]);
+assert.deepEqual(profileSources({ module: "教育经历", label: "GPA类型" }, { education: [{ gpa: "3.7" }] }), []);
+assert.deepEqual(profileSources({ module: "教育经历", label: "GPA类型" }, { education: [{ gpa: "3.7", gpaScale: "4分制" }] }), [{ path: "education[0].gpaScale", value: "4分制" }]);
+assert.deepEqual(profileSources({ module: "基本信息", label: "国籍/地区" }, { nationality: "测试民族" }), []);
+assert.deepEqual(profileSources({ module: "基本信息", label: "国籍/地区" }, { nationality: "测试民族", countryRegion: "测试国家" }), [{ path: "countryRegion", value: "测试国家" }]);
+assert.equal(aiFieldContext({ label: "目标工作城市" }, { jobIntent: { city: "测试城市" } }).sourceValue, "测试城市");
+assert.equal(aiFieldContext({ label: "目标职位类别" }, { jobIntent: { occupation: "测试岗位" } }).sourceValue, "测试岗位");
 assert.deepEqual(profileSources({ module: "工作经历", repeatIndex: 0, rowAnchor: { value: "陌生公司" } }, { work: [{ company: "A", title: "B" }] }), []);
 const separatedExperienceProfile = { separateInternships: true, work: [], internships: [{ company: "实习公司", title: "实习岗位" }], experiences: [{ company: "实习公司", title: "实习岗位" }] };
 assert.deepEqual(profileSources({ module: "工作经历", repeatIndex: 0 }, separatedExperienceProfile), []);
@@ -285,9 +341,9 @@ console.log("PASS generic text eligibility, repeat isolation and private payload
     action: { onClicked: { addListener() {} } },
     sidePanel: { open: async ({ tabId }) => opened.push(tabId) },
     runtime: { id: "test-extension", onMessage: { addListener: (handler) => { pageHandler = handler; } },
-      sendMessage: async (request) => { assert.deepEqual(request, { type: "RESUME_AUTOFILL_PAGE_RUN_V98", tabId: 42 }); return { status: "confirmed" }; } }
+      sendMessage: async (request) => { assert.deepEqual(request, { type: "RESUME_AUTOFILL_PAGE_RUN_V100", tabId: 42 }); return { status: "confirmed" }; } }
   });
-  const request = { type: "RESUME_AUTOFILL_PAGE_FILL_V98" };
+  const request = { type: "RESUME_AUTOFILL_PAGE_FILL_V100" };
   assert.equal(pageHandler(request, { id: "foreign", tab: { id: 42 }, frameId: 0 }, () => {}), undefined);
   assert.equal(pageHandler(request, { id: "test-extension", tab: { id: 42 }, frameId: 1 }, () => {}), undefined);
   const relayed = await new Promise((resolve) => assert.equal(pageHandler(request, { id: "test-extension", tab: { id: 42 }, frameId: 0 }, resolve), true));
@@ -325,5 +381,11 @@ console.log("PASS generic text eligibility, repeat isolation and private payload
   }
   returned = Array(2).fill({ key: "contact", profilePath: "email", confidence: 0.95 });
   assert.deepEqual((await semanticMatch(fields, profile)).assignments, []);
+  returned = [{ key: "award-2", profilePath: "awards[1].name", value: "其他", confidence: 0.99 }];
+  const awardProfile = { awards: [{ name: "赛事名称", level: "省级" }, { name: "优秀学生二等奖学金", level: "院级" }] };
+  const awardsMatched = await semanticMatch([{ key: "award-2", label: "奖项名称", type: "select", isChoice: true, module: "获奖信息", repeatIndex: 1, options: ["国家奖学金", "其他"] }], awardProfile);
+  assert.equal(awardsMatched.assignments[0].value, "其他");
+  assert.equal(payload.fields[0].sourceLevel, "院级");
+  assert.deepEqual(payload.fields[0].sources, [{ path: "awards[1].name", value: "优秀学生二等奖学金" }]);
   console.log("PASS client AI boundary: local text, private payload, stale keys, wrong rows, duplicate mappings");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

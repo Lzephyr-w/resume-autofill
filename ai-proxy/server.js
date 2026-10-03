@@ -112,6 +112,8 @@ function sanitizeAssignments(result, fields) {
   return assignmentResults(result, fields).filter((item) => item.reason === "accepted").map((item) => item.assignment);
 }
 
+const allowsAwardOther = (field, path) => /奖项名称|获奖项|获奖名称|竞赛名称/.test(String(field.label || ""))
+  && /^awards\[\d+\]\.name$/.test(String(path || ""));
 function mappingResults(result, fields) {
   const list = Array.isArray(result?.assignments) ? result.assignments : [];
   return fields.map((field) => {
@@ -123,8 +125,11 @@ function mappingResults(result, fields) {
     if (!Number.isFinite(item.confidence) || item.confidence < 0.8 || item.confidence > 1) return { ...detail, reason: "low-confidence" };
     if (field.currentValue) return { ...detail, reason: "page-value-protected" };
     if (field.isChoice && !field.options?.includes(item.value)) return { ...detail, stage: "candidate", reason: field.options?.length ? "not-a-page-option" : "options-unavailable" };
+    const sourceValue = String(field.sources.find((source) => source.path === item.profilePath)?.value || "").trim();
+    const awardOther = /^(其他|其它|other)$/i.test(String(item.value).trim()) && allowsAwardOther(field, item.profilePath)
+      && !optionMatch(sourceValue, (field.options || []).filter((option) => !/^(其他|其它|other)$/i.test(option)), field);
     if (field.isChoice && /^(其他|其它|other|不限|无|未填写)$/i.test(String(item.value).trim())
-      && String(field.sources.find((source) => source.path === item.profilePath)?.value || "").trim().toLowerCase() !== String(item.value).trim().toLowerCase())
+      && sourceValue.toLowerCase() !== String(item.value).trim().toLowerCase() && !awardOther)
       return { ...detail, stage: "candidate", reason: "fallback-option-not-source" };
     return { ...detail, reason: "accepted", assignment: { key: field.key, profilePath: item.profilePath, confidence: item.confidence, value: field.isChoice ? item.value : "" } };
   });
@@ -157,6 +162,9 @@ async function match(fields) {
     "严格区分字段含义、module 和重复条目；联系方式、日期、分数、描述不能互换。无明确语义或有歧义时省略。",
     "普通文本字段只匹配来源路径，value 必须为空，客户端从本地档案取原值。",
     "选择字段 isChoice=true 时，参考 sources 的本地值，value 必须完整原样来自该字段 options；候选为空或不匹配则省略。",
+    "类型/类别字段允许把来源的具体职业或名称归入页面提供的上位类别；例如职业归入职能类别、奖项归入获奖类型。仅在归属明确时返回；具体名称字段不可用上位类别替代。",
+    "名称字段可按同一实体的简称、别名或地域/赛道/等次附加信息匹配完整候选。结合 sourceLevel 判断，奖学金的级别与等次不能互换。",
+    "allowOther=true 的奖项名称先匹配同一奖项；候选均不对应且存在其他/其它/other 时可选该项。其他字段不能用兜底选项替代明确来源，也不能选不限/无/未填写来伪装填充。",
     '只返回 JSON：{"assignments":[{"key":"给定键","profilePath":"给定路径","value":"","confidence":0.95}]}。字段：',
     JSON.stringify(fields)
   ].join("\n");
@@ -211,6 +219,8 @@ const server = http.createServer(async (req, res) => {
         labels: (Array.isArray(field.labels) ? field.labels : []).slice(0, 3).map(text),
         data: Object.fromEntries(Object.entries(field.data || {}).slice(0, 6).map(([key, value]) => [text(key), text(value)])),
         options: (Array.isArray(field.options) ? field.options : []).slice(0, 80).map(text),
+        sourceLevel: field.isChoice ? text(field.sourceLevel) : "",
+        allowOther: field.isChoice === true && field.sources.some((source) => allowsAwardOther(field, source.path)),
         sources: field.sources.map((source) => ({ path: text(source.path), ...(field.isChoice ? { value: text(source.value) } : {}) }))
       };
     });

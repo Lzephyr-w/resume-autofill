@@ -220,7 +220,7 @@
     document.querySelector("#form").addEventListener("change", (event) => changed.add(`change:${event.target.id || event.target.name}`));
     globalThis.__RESUME_AUTOFILL_TEST__ = true;
   </script>
-  <script src="../content.js?v=protocol-98-popup-owner-2"></script>
+  <script src="../content.js?v=100-datepicker-commit"></script>
   <script>
     (async () => {
       if (fullDatePhoenix) {
@@ -265,7 +265,7 @@
           && document.querySelector("#project1")?.value === "项目二"
           && document.querySelector("#internship1")?.value === "实习二"
           && document.querySelector("#project1Desc")?.value === "项目二描述"
-          && document.querySelector("#internship1Desc")?.value === "实习二描述"
+          && document.querySelector("#internship1Desc")?.value === "职责：\n实习二描述"
           && document.querySelectorAll("#awardRows .resumeEditForm-item").length === 2
           && document.querySelector("#award0Title")?.value === "一等奖" && document.querySelector("#award1Title")?.value === "二等奖"
           && document.querySelector('[data-cy="award[0].dateInput"]')?.value === "2024" && document.querySelector('[data-cy="award[1].dateInput"]')?.value === "2025"
@@ -472,6 +472,7 @@
         ["自我描述", text("selfEvaluation") === profile.extras.selfEvaluation]
       ];
       report.diagnostics.autocomplete = mokaEducation;
+      report.diagnostics.nestedEducation = nestedEducation;
       report.diagnostics.rerender = { parent: rerenderParent, options: rerenderOptions, final: rerenderFinal };
       const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
       const output = document.querySelector("#result");

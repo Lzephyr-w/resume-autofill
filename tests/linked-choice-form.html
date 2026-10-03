@@ -1,0 +1,100 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>异步月份与联动选择回归</title>
+<style>body{font:16px system-ui;padding:20px}section{margin:20px}.generic-array-card{padding:10px}label{display:block;margin:8px}input,select{min-width:140px;padding:6px}.generic-select{display:inline-block;min-width:140px;min-height:24px;padding:6px;border:1px solid}.generic-picker-dropdown{position:absolute;background:white;border:1px solid;padding:12px;z-index:10}.year-option,.month-option{display:inline-block;padding:7px;cursor:pointer}</style>
+<section><h2>基本信息</h2><label>目标职位类别<select id="role"><option value="">请选择</option><option>工程类</option><option>市场类</option><option>职能类</option></select></label><div class="field"><label>预计毕业时间</label><div class="generic-date-picker"><input id="graduation" readonly placeholder="请选择"></div></div></section>
+<section><h2>教育经历</h2><div class="generic-array-card"><label>学校名称<input value="回归院校"></label><div class="field"><label>起止时间</label><div class="generic-picker-range"><div class="generic-date-picker"><input id="start" placeholder="请选择开始时间"></div>~<div class="generic-date-picker"><input id="end" readonly placeholder="请选择结束时间"></div></div></div></div></section>
+<section><div>获奖信息</div><div id="awards"></div></section>
+<section><h2>项目经历</h2><div class="generic-array-card"><label>项目名称<input value="依赖回归"></label><label>项目类别<select id="projectType"><option value="">请选择</option><option>科研</option></select></label><label>成果名称<select id="projectName"><option value="">请选择</option><option>旧候选</option></select></label></div></section>
+<section><h2>其他信息</h2><div class="field"><label>初始化日期</label><div class="generic-date-picker"><input id="coldDate" placeholder="请选择"></div></div></section>
+<pre id="result">运行中…</pre>
+<script>
+document.getElementById('awards').innerHTML=[0,1].map(i=>`<div class="generic-array-card"><div>获奖信息-${i+1}</div><label>获奖类型<select id="type${i}"><option value="">请选择</option><option>奖学金</option><option>竞赛获奖</option></select></label><label>奖项名称<select id="name${i}"><option value="">请选择</option><option>旧候选</option></select></label><label>奖项说明<input id="desc${i}"></label></div>`).join('');
+document.getElementById('type0').outerHTML='<div id="type0" role="combobox" tabindex="0" class="generic-select"><span class="selection-item"></span></div>';
+let choiceMenu,syntheticChanges=0;
+document.getElementById('type0').onclick=()=>{
+  choiceMenu?.remove();choiceMenu=document.createElement('div');choiceMenu.setAttribute('role','listbox');choiceMenu.className='generic-select-menu';choiceMenu.style.cssText='position:fixed;left:500px;top:20px;background:white;border:1px solid;padding:10px';
+  choiceMenu.innerHTML=['奖学金','竞赛获奖'].map(value=>`<div role="option">${value}</div>`).join('');
+  choiceMenu.onclick=e=>{const option=e.target.closest('[role=option]');if(!option)return;const type=document.getElementById('type0');type.value=option.textContent;type.querySelector('span').textContent=type.value;document.getElementById('name0').innerHTML='<option value="">请选择</option><option>优秀学生二等奖学金</option>';choiceMenu.remove();choiceMenu=null;};
+  document.body.append(choiceMenu);
+};
+document.getElementById('type0').onchange=()=>{syntheticChanges++;document.getElementById('name0').innerHTML='<option value="">请选择</option>';};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){choiceMenu?.remove();choiceMenu=null;}});
+document.body.addEventListener('mousedown',e=>{if(!e.target.closest('.generic-select,.generic-select-menu')){choiceMenu?.remove();choiceMenu=null;}});
+let wrongMonth=0, monthClicks=0, popup, coldInitialized=false, coldFocused=false, coldEditing=false, coldOpens=0;
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+const openPicker=input=>{
+  if(popup)popup.remove();
+  popup=document.createElement('div');popup.className='generic-picker-dropdown';
+  popup.style.left=input.getBoundingClientRect().left+'px';popup.style.top=(input.getBoundingClientRect().bottom+scrollY)+'px';
+  const panel=popup;
+  let year=2026,changing=false,yearsReady=input.id!=='graduation';
+  // Cache the first rendered year list before focus initializes the anchor.
+  const coldBroken=input.id==='coldDate'&&!coldInitialized;
+  if(input.id==='coldDate'){coldOpens++;coldInitialized=true;}
+  const render=()=>{
+    popup.innerHTML=`<div class="generic-year-title">${year}年</div><aside>${(coldBroken?Array.from({length:25},(_,i)=>i-12):yearsReady?[2023,2026,2027]:Array.from({length:11},(_,i)=>2016+i)).map(y=>`<span class="year-option">${y}</span>`).join('')}</aside><div>${Array.from({length:12},(_,i)=>`<span class="month-option" data-disabled="${i===10}"><span>${i+1}月</span></span>`).join('')}</div>`;
+  };
+  render();document.body.append(popup);
+  if(!yearsReady)setTimeout(()=>{if(popup===panel&&panel.isConnected){yearsReady=true;render();}},300);
+  popup.onclick=async e=>{
+    const y=e.target.closest('.year-option'),m=e.target.closest('.month-option');
+    if(y){changing=true;const wanted=Number(y.textContent);await delay(180);year=wanted;changing=false;render();}
+    if(m){monthClicks++;if(changing||m.dataset.disabled==='true'){wrongMonth++;return;}input.value=year+'-'+String(parseInt(m.textContent)).padStart(2,'0');popup.remove();popup=null;}
+  };
+};
+document.querySelectorAll('.generic-date-picker input').forEach(input=>{input.onfocus=()=>{if(input.id==='coldDate'){coldFocused=true;coldEditing=true;}openPicker(input);};input.onblur=()=>{if(input.id==='coldDate')coldFocused=false;};input.onkeydown=e=>{if(input.id==='coldDate'&&e.code==='Tab'){coldEditing=false;popup?.remove();popup=null;}};input.onclick=()=>{if(input.id==='coldDate'){if(!popup)openPicker(input);return;}if(popup){popup.remove();popup=null;}else openPicker(input);};});
+document.body.addEventListener('mousedown',e=>{if(!coldFocused&&!coldEditing&&!e.target.closest('.generic-picker-dropdown,.generic-date-picker')){popup?.remove();popup=null;}});
+document.querySelectorAll('#awards select[id^=type]').forEach(select=>select.onchange=()=>{
+  const index=select.id.slice(-1),name=document.getElementById('name'+index);
+  name.innerHTML='<option value="">请选择</option>'+ (select.value==='奖学金'?'<option>优秀学生二等奖学金</option>':'<option>算法杯二等奖</option>');
+});
+document.getElementById('projectType').onchange=()=>document.getElementById('projectName').innerHTML='<option value="">请选择</option><option>论文成果</option>';
+globalThis.__RESUME_AUTOFILL_TEST__=true;
+</script>
+<script src="../content.js?v=100-datepicker-commit"></script>
+<script>
+(async()=>{
+  const api=__resumeAutofillTest,checks=[];
+  const check=(name,ok)=>checks.push([name,!!ok]);
+  const coldField=api.formSchema().find(f=>f.id==='coldDate');
+  const coldResult=await api.applyAssignments([{key:coldField.key,value:'2027-06',confidence:1}]);
+  check('失焦不足以结束日期编辑时用 Tab 关闭并重建面板',coldResult.filled===1&&document.getElementById('coldDate').value==='2027-06'&&coldOpens===2&&wrongMonth===0&&!coldEditing);
+  const profile={education:[{school:'回归院校',degree:'本科',start:'2023-09',end:'2027-06'}],jobIntent:{occupation:'前端开发'},awards:[{name:'优秀学生二等奖学金',level:'院级',description:'学业优秀'},{name:'算法杯二等奖',level:'省级',description:'算法竞赛'}],projects:[{name:'依赖回归'}],customFields:{},extras:{}};
+  await api.fill(profile,{onlyEmpty:true,deferChoices:true});
+  check('等待迟到的年份候选和异步月份重建',document.getElementById('start').value==='2023-09'&&document.getElementById('end').value==='2027-06'&&document.getElementById('graduation').value==='2027-06'&&wrongMonth===0);
+  check('自定义父项提交后不发多余 change 清空子选项',syntheticChanges===0);
+  check('类别在名称前填充，说明使用原说明',document.getElementById('type0').value==='奖学金'&&document.getElementById('name0').value==='优秀学生二等奖学金'&&document.getElementById('desc0').value==='学业优秀');
+  check('父项未确认时不填旧子候选',!document.getElementById('type1').value&&!document.getElementById('name1').value);
+  const before=api.formSchema(),child=before.find(f=>f.id==='name1'),parent=before.find(f=>f.id==='type1');
+  check('编号卡片归属同一模块且第二条索引为1',child.module===before.find(f=>f.id==='name0').module&&child.repeatIndex===1);
+  check('跨选择框依赖限定在同一行',child.dependsOn===parent.key&&before.find(f=>f.id==='name0').dependsOn===before.find(f=>f.id==='type0').key);
+  check('通用类型与名称依赖，不绑定获奖模块',before.find(f=>f.id==='projectName').dependsOn===before.find(f=>f.id==='projectType').key);
+  const source=await (await fetch('../popup.js')).text();
+  const helpers=source.slice(source.indexOf('function fieldLabel'),source.indexOf('const missingLocalValue'));
+  const fillSource=source.slice(source.indexOf('async function fillPage'),source.indexOf('let fillInProgress'));
+  const requests=[],statuses=[];
+  const chrome={tabs:{get:async()=>({id:1,url:location.href})},storage:{local:{remove:async()=>{},get:async()=>({aiConfig:{apiKey:'test',baseUrl:'test',model:'test'}}),set:async()=>{}}}};
+  const sendToFrame=async(_tab,_frame,message)=>message.type==='GET_FORM_SCHEMA'?{fields:api.formSchema()}:message.type==='GET_LIVE_OPTIONS'?{fields:await api.liveOptions(message.keys,message.keepOpen,message.previousOptions)}:message.type==='APPLY_ASSIGNMENTS'?api.applyAssignments(message.assignments):api.fill(message.profile,message.options);
+  const mockFetch=async(url,request)=>{
+    if(url.endsWith('/config'))return {ok:true};
+    const fields=JSON.parse(request.body).fields;requests.push(fields);
+    return {ok:true,json:async()=>({assignments:fields.flatMap(f=>{
+      const value=f.label==='目标职位类别'?'工程类':f.label==='获奖类型'?'竞赛获奖':f.label==='奖项名称'?'算法杯二等奖':'';
+      return value&&f.options.includes(value)?[{key:f.key,profilePath:f.sources.find(s=>s.path.endsWith('.name'))?.path||f.sources[0].path,value,confidence:0.99}]:[];
+    })})};
+  };
+  const fillPage=Function('chrome','fetch','proxyUrl','isWebPage','collectManualForm','hasManualData','saveManualProfile','injectCurrentContent','formFrame','sendToFrame','message','$','console',`${helpers};const missingLocalValue=()=>false;${fillSource};return fillPage;`)(chrome,mockFetch,'test',()=>true,()=>profile,()=>true,async()=>profile,async()=>{},async()=>({frameId:0}),sendToFrame,(text)=>statuses.push(text),()=>({}),{info:()=>{}});
+  await fillPage(1);
+  check('AI 职业类别与奖项父子两阶段填充',document.getElementById('role').value==='工程类'&&document.getElementById('type1').value==='竞赛获奖'&&document.getElementById('name1').value==='算法杯二等奖');
+  check('子候选在父项提交后重新读取',!requests[0].some(f=>f.key===child.key)&&requests.at(-1).some(f=>f.key===child.key&&f.options.includes('算法杯二等奖')&&!f.options.includes('旧候选')));
+  check('AI 奖项来源与级别限定在正确记录',requests.at(-1).some(f=>f.key===child.key&&f.sourceLevel==='省级'&&f.sources[0].path==='awards[1].name'));
+  const stable=monthClicks;
+  await api.fill(profile,{onlyEmpty:true,deferChoices:true});
+  check('重复运行保护已填日期和奖项',monthClicks===stable&&document.getElementById('name0').value==='优秀学生二等奖学金');
+  const field=api.formSchema().find(f=>f.id==='graduation');document.getElementById('graduation').value='';
+  const disabled=await api.applyAssignments([{key:field.key,value:'2027-11',confidence:1}]);
+  check('禁用月份不点击、不误报成功',disabled.filled===0&&!document.getElementById('graduation').value&&wrongMonth===0);
+  document.getElementById('result').textContent=`${checks.every(([,ok])=>ok)?'PASS':'FAIL'}\n${checks.map(([name,ok])=>`${ok?'✓':'✗'} ${name}`).join('\n')}\n${checks.every(([,ok])=>ok)?'':JSON.stringify({statuses,requests,disabled})}`;
+})().catch(e=>document.getElementById('result').textContent='FAIL '+e.stack);
+</script>

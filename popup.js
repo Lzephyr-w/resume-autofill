@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
 const emptyProfile = () => ({
-  name: "", phone: "", email: "", gender: "", birthDate: "", age: "", nationality: "", politicalStatus: "", wechat: "", nativePlace: "", currentResidence: "", householdRegistration: "", workExperience: "",
+  name: "", phone: "", email: "", gender: "", birthDate: "", age: "", nationality: "", countryRegion: "", politicalStatus: "", wechat: "", nativePlace: "", currentResidence: "", householdRegistration: "", workExperience: "",
   jobIntent: { industry: "", occupation: "", currentSalary: "", expectedSalary: "", city: "", arrival: "" },
   education: [], experiences: [], work: [], internships: [], projects: [], cadres: [], skills: [], languages: [], certificates: [], awards: [], customFields: {}, extras: { hobbies: "", specialty: "", selfEvaluation: "", skills: "", languages: "", awards: "", studentCadres: "" }
 });
@@ -47,6 +47,7 @@ function awardsFromText(value) {
 }
 
 const aliases = {
+  countryRegion: ["国家/地区", "国家／地区", "国家地区", "国家或地区", "国家（地区）", "国家(地区)", "国家", "country/region", "country"],
   name: ["姓名", "名字"], phone: ["手机", "手机号", "电话", "联系电话"], email: ["邮箱", "电子邮箱", "email"],
   gender: ["性别"], birthDate: ["出生日期", "生日"], age: ["年龄", "周岁"], nationality: ["国籍", "民族"], politicalStatus: ["政治面貌"], wechat: ["微信号"], nativePlace: ["籍贯"], currentResidence: ["现居住地", "当前居住地", "现居地", "居住地"], workExperience: ["工作经验", "工作年限", "经验年限"],
   city: ["期望工作城市", "工作城市", "意向城市"], arrival: ["到岗时间", "入职时间"],
@@ -62,7 +63,7 @@ const aliases = {
 function cleanProfile(input) {
   const base = emptyProfile();
   const p = input || {};
-  ["name", "phone", "email", "gender", "birthDate", "age", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience"].forEach((key) => {
+  ["name", "phone", "email", "gender", "birthDate", "age", "nationality", "countryRegion", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience"].forEach((key) => {
     if (p[key] != null) base[key] = String(p[key]).trim();
   });
   const monthOnlyBirth = base.birthDate.match(/^(\d{4})\s*(?:年|[./-])\s*(\d{1,2})(?:月)?$/);
@@ -129,7 +130,7 @@ function cleanProfile(input) {
   base.customFields = Object.fromEntries(Object.entries(p.customFields || {})
     .map(([key, value]) => [String(key).trim(), String(value ?? "").trim()])
     .filter(([key, value]) => key && value));
-  const standard = new Set(["name", "phone", "email", "gender", "birthDate", "age", "nationality", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience", "jobIntent", "education", "experiences", "work", "internships", "projects", "cadres", "skills", "languages", "certificates", "awards", "customFields", "extras"]);
+  const standard = new Set(["name", "phone", "email", "gender", "birthDate", "age", "nationality", "countryRegion", "politicalStatus", "wechat", "nativePlace", "currentResidence", "householdRegistration", "workExperience", "jobIntent", "education", "experiences", "work", "internships", "projects", "cadres", "skills", "languages", "certificates", "awards", "customFields", "extras"]);
   Object.entries(p).forEach(([key, value]) => {
     if (!standard.has(key) && value != null && typeof value !== "object" && String(value).trim()) base.customFields[key] = String(value).trim();
   });
@@ -292,6 +293,7 @@ function parseText(text) {
   p.name = findValue(lines, aliases.name); p.phone = findValue(lines, aliases.phone);
   p.email = findValue(lines, aliases.email); p.gender = findValue(lines, aliases.gender);
   p.birthDate = findValue(lines, aliases.birthDate); p.age = findValue(lines, aliases.age); p.nationality = findValue(lines, aliases.nationality);
+  p.countryRegion = findValue(lines, aliases.countryRegion);
   p.politicalStatus = findValue(lines, aliases.politicalStatus);
   p.wechat = findValue(lines, aliases.wechat); p.nativePlace = findValue(lines, aliases.nativePlace);
   p.currentResidence = findValue(lines, aliases.currentResidence);
@@ -360,7 +362,7 @@ function message(value, error = false, target = "status", variant = "") {
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
 async function activeTab() { return (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; }
-const CONTENT_MESSAGE_SUFFIX = "_V98";
+const CONTENT_MESSAGE_SUFFIX = "_V100";
 const contentMessage = (message) => ({ ...message, type: `${message.type}${CONTENT_MESSAGE_SUFFIX}` });
 const injectCurrentContent = (tabId) => {
   if (!chrome.scripting?.executeScript) throw new Error("扩展权限尚未更新，请在 chrome://extensions 重载扩展后重试。");
@@ -404,15 +406,16 @@ function aiFieldContext(field, profile) {
   const personalLocation = /家乡|籍贯|户籍|户口|居住|所在(?:地|地点|地区)?/.test(label) && !/(?:工作|期望|任职|办公)/.test(`${module} ${label}`);
   const personalSource = /家乡|籍贯/.test(label) ? profile?.nativePlace
     : /户籍|户口/.test(label) ? profile?.householdRegistration
-      : /居住|所在(?:地|地点|地区)?/.test(label) ? profile?.currentResidence : "";
+      : /居住|所在(?:地|地点|地区)?/.test(label) ? profile?.currentResidence
+        : /^(?:国籍[\/／]地区|国家(?:[\/／或（(]?地区[）)]?)?|country(?:[\/\s]*region)?)$/i.test(label) ? profile?.countryRegion : "";
   const rows = /实习/.test(module) ? (profile?.internships?.length ? profile.internships : all) : /工作/.test(module) ? (profile?.separateInternships ? profile.work || [] : profile?.work?.length ? profile.work : all) : /工作地点|月薪|职位名称|所在部门|工作性质/.test(label) ? all : [];
   const educationType = /学历类型|受教育类型|培养方式|学习方式|就读方式/.test(label) ? profile?.education?.[index]?.training : "";
   const languageProficiency = /语言/.test(module) && /掌握程度|熟练程度|精通程度|语言水平/.test(label) ? profile?.languages?.[index]?.proficiency : "";
-  const intentField = /求职意向|期望|现月薪|工作城市|行业|职业|到岗/.test(`${module} ${label}`);
+  const intentField = /求职意向|期望|目标职位类别|现月薪|工作城市|行业|职业|到岗/.test(`${module} ${label}`);
   const sourceValue = /期望从事行业|期望行业|意向行业/.test(label) ? profile?.jobIntent?.industry
-    : /期望从事职业|期望职业|意向职位/.test(label) ? profile?.jobIntent?.occupation
+    : /期望从事职业|期望职业|意向职位|目标职位类别/.test(label) ? profile?.jobIntent?.occupation
       : /期望月薪|期望薪资|期望待遇/.test(label) ? profile?.jobIntent?.expectedSalary
-        : /期望工作城市|期望城市|意向城市|期望工作地点|期望地点/.test(label) ? profile?.jobIntent?.city
+        : /期望工作城市|目标工作城市|期望城市|意向城市|期望工作地点|期望地点/.test(label) ? profile?.jobIntent?.city
           : /工作地点|办公地点|工作地区|办公城市|任职地点/.test(label) ? rows[index]?.location : educationType || languageProficiency || personalSource;
   const locationCandidates = personalLocation ? [
     ["nativePlace", "籍贯", profile?.nativePlace], ["currentResidence", "现居住地", profile?.currentResidence], ["householdRegistration", "户口所在地", profile?.householdRegistration]
@@ -447,11 +450,16 @@ function profileSources(field, profile) {
   const add = (path, value) => { if (!/password|api.?key|token|密码|验证码/i.test(path) && (typeof value === "string" || typeof value === "number") && String(value).trim()) sources.push({ path, value: String(value) }); };
   if (group) Object.entries(groupRows[row]?.item || {}).forEach(([key, value]) => add(`${group}[${groupRows[row].index}].${key}`, value));
   else {
-    for (const key of ["name", "gender", "phone", "email", "birthDate", "age", "nationality", "politicalStatus", "nativePlace", "householdRegistration", "currentResidence", "wechat", "workExperience"] ) add(key, profile[key]);
+    for (const key of ["name", "gender", "phone", "email", "birthDate", "age", "nationality", "countryRegion", "politicalStatus", "nativePlace", "householdRegistration", "currentResidence", "wechat", "workExperience"] ) add(key, profile[key]);
     for (const root of ["jobIntent", "extras", "customFields"]) Object.entries(profile[root] || {}).forEach(([key, value]) => add(`${root}[${JSON.stringify(key)}]`, value));
   }
-  const standardPath = { name: "name", email: "email", tel: "phone", bday: "birthDate", sex: "gender" }[String(field.autocomplete || "").split(" ").at(-1)]
+  const standardPath = { name: "name", email: "email", tel: "phone", bday: "birthDate", sex: "gender", country: "countryRegion", "country-name": "countryRegion" }[String(field.autocomplete || "").split(" ").at(-1)]
     || ({ email: "email", tel: "phone" })[field.type];
+  if (/GPA\s*类型|绩点(?:类型|满分|制式)/i.test(fieldLabel(field))) return sources.filter(({ path }) => /\.(?:gpaType|gpaScale)$/.test(path));
+  if (/期望从事职业|期望职业|期望职位|意向职位|目标职位|意向岗位/.test(fieldLabel(field))) return sources.filter(({ path }) => path === 'jobIntent["occupation"]');
+  if (/获奖类型|奖励类型|奖项类别/.test(fieldLabel(field))) return sources.filter(({ path }) => /\.(?:name|type|category)$/.test(path));
+  if (/奖项名称|获奖项|获奖名称|竞赛名称/.test(fieldLabel(field))) return sources.filter(({ path }) => /\.name$/.test(path));
+  if (/^(?:国籍[\/／]地区|国家(?:[\/／或（(]?地区[）)]?)?|country(?:[\/\s]*region)?)$/i.test(fieldLabel(field))) return sources.filter(({ path }) => path === "countryRegion");
   return (standardPath ? sources.filter((source) => source.path === standardPath) : sources).slice(0, 100);
 }
 async function semanticMatch(fields, profile) {
@@ -460,12 +468,15 @@ async function semanticMatch(fields, profile) {
     const sources = sourceMaps.get(field.key);
     const choice = !semanticTextField(field);
     const bounded = (value) => String(value || "").slice(0, 160);
+    const awardPath = [...sources.keys()].find((path) => /^awards\[\d+\]\.name$/.test(path));
+    const awardLevel = awardPath ? profile.awards?.[Number(awardPath.match(/\[(\d+)\]/)[1])]?.level : "";
     return {
       key: field.key, label: bounded(field.label), type: field.type, module: bounded(field.module), repeatIndex: field.repeatIndex,
       autocomplete: bounded(field.autocomplete), ariaLabel: bounded(field.ariaLabel), placeholder: bounded(field.placeholder),
       name: bounded(field.name), id: bounded(field.id), title: bounded(field.title),
       labels: (field.labels || []).slice(0, 3).map(bounded), data: field.data || {}, isChoice: choice,
       options: choice ? (field.options || []).slice(0, 80).map(bounded) : [], optionSource: field.optionSource,
+      sourceLevel: choice ? bounded(awardLevel) : "",
       // Text pairing needs field names, not contact details or full resume prose.
       sources: [...sources].map(([path, value]) => ({ path, ...(choice ? { value: value.slice(0, 160) } : {}) }))
     };
@@ -675,7 +686,8 @@ async function fillPage(tabId) {
     let retryKeys;
     for (let pass = 0; pass < 2 && emptyFields.length; pass++) {
       const passFields = retryKeys ? emptyFields.filter((field) => retryKeys.has(field.key)) : emptyFields;
-      const eligible = passFields.filter((field) => !missingLocalValue(field, profile) && (hasProfileContext(field, profile) || profileSources(field, profile).length));
+      const eligible = passFields.filter((field) => (!field.dependsOn || schema.fields.some((parent) => parent.key === field.dependsOn && parent.currentValue))
+        && !missingLocalValue(field, profile) && (hasProfileContext(field, profile) || profileSources(field, profile).length));
       const live = eligible.length ? await sendToFrame(tab.id, target.frameId, { type: "GET_LIVE_OPTIONS", keys: eligible.map((field) => field.key) }) : { fields: [] };
       const eligibleKeys = new Set(eligible.map((field) => field.key));
       const scannedFields = uniqueEmptyFields(live.fields || []).filter((field) => eligibleKeys.has(field.key));
@@ -763,9 +775,12 @@ async function fillPage(tabId) {
       console.info("[resume-autofill] AI matching", { pass: pass + 1, fields: liveFields.length, filled: applied.filled || 0 });
       aiFilled += appliedAiFilled;
       retryKeys = retryFieldKeys(scannedFields, (local.filled || 0) + (applied.filled || 0));
-      if (!retryKeys.size) break;
       schema = await sendToFrame(tab.id, target.frameId, { type: "GET_FORM_SCHEMA" });
       emptyFields = uniqueEmptyFields(schema.fields || []).filter((field) => !missingLocalValue(field, profile));
+      const scannedKeys = new Set(scannedFields.map((field) => field.key));
+      for (const field of emptyFields) if (field.dependsOn && !scannedKeys.has(field.key)
+        && schema.fields.some((parent) => parent.key === field.dependsOn && parent.currentValue)) retryKeys.add(field.key);
+      if (!retryKeys.size) break;
     }
     const after = await sendToFrame(tab.id, target.frameId, { type: "GET_FORM_SCHEMA" });
     const remaining = uniqueEmptyFields(after.fields || []);
@@ -783,7 +798,7 @@ async function fillPage(tabId) {
       stage: item.stage || stageFor(item.reason || ""), reason: item.reason, optionCount: item.optionCount,
       interaction: item.choice?.failure, path: item.choice?.path, dateControlCount: item.dateControlCount });
     const diagnostics = [...allDiagnostics.structured, ...aiDiagnostics.flatMap((pass) => [...pass.model, ...pass.apply])].map(safeDiagnostic);
-    await chrome.storage.local.set({ lastAiDiagnostics: { protocol: 98, discovered: after.fields?.length || 0, structuredFilled: repaired.filled,
+    await chrome.storage.local.set({ lastAiDiagnostics: { protocol: 100, discovered: after.fields?.length || 0, structuredFilled: repaired.filled,
       candidateFilled, aiFilled, protected: repaired.skippedFields?.length || 0, remaining: remaining.length, diagnostics } });
     const failures = diagnostics.filter((item) => !["filled", "accepted", "page-value-protected", "deferred-to-ai"].includes(item.reason));
     const failureText = [...new Set(failures.map((item) => `${item.stage}:${item.reason}`))].slice(0, 6).join("、");
@@ -804,7 +819,7 @@ async function fillCurrentPage(tabId) {
 }
 $("ai").addEventListener("click", () => fillCurrentPage());
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request?.type !== "RESUME_AUTOFILL_PAGE_RUN_V98" || sender.id !== chrome.runtime.id || sender.tab || !Number.isInteger(request.tabId)) return false;
+  if (request?.type !== "RESUME_AUTOFILL_PAGE_RUN_V100" || sender.id !== chrome.runtime.id || sender.tab || !Number.isInteger(request.tabId)) return false;
   if (fillInProgress) { sendResponse({ status: "已有填充正在进行，请等待完成。" }); return false; }
   fillCurrentPage(request.tabId).then(async () => {
     const { lastAiDiagnostics } = await chrome.storage.local.get("lastAiDiagnostics");
@@ -824,11 +839,11 @@ chrome.tabs.onActivated.addListener(({ tabId }) => showPageAction(tabId).catch((
 const MANUAL_STORAGE_KEY = "applicationFormData";
 const MANUAL_SINGLE_FIELD_IDS = [
   "fullName", "gender", "phone", "email", "birthDate", "age", "idType", "idNumber", "nativePlace",
-  "wechat", "nationality", "politicalStatus", "currentResidence", "householdRegistration", "workExperience", "intentIndustry", "intentOccupation", "intentCurrentSalary", "intentExpectedSalary", "intentCity", "intentArrival", "skills", "selfEvaluation"
+  "wechat", "nationality", "countryRegion", "politicalStatus", "currentResidence", "householdRegistration", "workExperience", "intentIndustry", "intentOccupation", "intentCurrentSalary", "intentExpectedSalary", "intentCity", "intentArrival", "skills", "selfEvaluation"
 ];
 const REPEAT_GROUPS = {
-  educations: { firstId: "university", label: "教育经历", addLabel: "新增教育经历", fields: [["degree", "education"], ["training", "educationType"], ["school", "university"], ["college", "college"], ["major", "major"], ["start", "educationStart"], ["end", "graduationYear"], ["gpa", "gpa"]] },
-  experiences: { firstId: "internCompany1", label: "经历", addLabel: "新增实习/工作经历", fields: [["company", "internCompany"], ["department", "internDepartment"], ["title", "internPosition"], ["start", "internStart"], ["end", "internEnd"], ["salary", "internSalary"], ["location", "internLocation"], ["reason", "internReason"], ["description", "internContent"]] },
+  educations: { firstId: "university", label: "教育经历", addLabel: "新增教育经历", fields: [["degree", "education"], ["training", "educationType"], ["school", "university"], ["college", "college"], ["major", "major"], ["start", "educationStart"], ["end", "graduationYear"], ["gpa", "gpa"], ["gpaType", "gpaType"], ["rank", "educationRank"]] },
+  experiences: { firstId: "internCompany1", label: "经历", addLabel: "新增实习/工作经历", fields: [["company", "internCompany"], ["department", "internDepartment"], ["title", "internPosition"], ["start", "internStart"], ["end", "internEnd"], ["salary", "internSalary"], ["location", "internLocation"], ["reason", "internReason"], ["description", "internContent"], ["highlights", "internHighlights"]] },
   projects: { firstId: "projectName1", label: "项目", addLabel: "新增项目", fields: [["name", "projectName"], ["role", "projectRole"], ["start", "projectStart"], ["end", "projectEnd"], ["link", "projectLink"], ["description", "projectDesc"], ["responsibilities", "projectDuty"]] },
   cadres: { firstId: "cadrePosition1", label: "干部经历", addLabel: "新增干部经历", fields: [["position", "cadrePosition"], ["level", "cadreLevel"], ["start", "cadreStart"], ["end", "cadreEnd"], ["duty", "cadreDuty"]] },
   languageAbilities: { firstId: "languageType1", label: "语言能力", addLabel: "新增语言能力", fields: [["language", "languageType"], ["proficiency", "languageProficiency"], ["speaking", "languageSpeaking"], ["reading", "languageReading"]] },
@@ -942,7 +957,7 @@ function manualProfileFromForm(data) {
   return cleanProfile({
     name: data.fullName, phone: data.phone, email: data.email, gender: data.gender,
     birthDate: data.birthDate, age: data.age, nativePlace: data.nativePlace, wechat: data.wechat,
-    nationality: data.nationality, politicalStatus: data.politicalStatus,
+    nationality: data.nationality, countryRegion: data.countryRegion, politicalStatus: data.politicalStatus,
     currentResidence: data.currentResidence, householdRegistration: data.householdRegistration, workExperience: data.workExperience,
     education: educations,
     experiences, work, internships,
@@ -963,7 +978,7 @@ function manualFormFromProfile(profile) {
     fullName: profile?.name, gender: profile?.gender, phone: profile?.phone, email: profile?.email,
     birthDate: profile?.birthDate, age: profile?.age, idType: profile?.customFields?.证件类型,
     idNumber: profile?.customFields?.证件号码, nativePlace: profile?.nativePlace,
-    wechat: profile?.wechat, nationality: profile?.nationality, politicalStatus: profile?.politicalStatus,
+    wechat: profile?.wechat, nationality: profile?.nationality, countryRegion: profile?.countryRegion, politicalStatus: profile?.politicalStatus,
     currentResidence: profile?.currentResidence,
     householdRegistration: profile?.householdRegistration || profile?.customFields?.户口所在地, workExperience: profile?.workExperience,
     intentIndustry: profile?.jobIntent?.industry, intentOccupation: profile?.jobIntent?.occupation, intentCurrentSalary: profile?.jobIntent?.currentSalary,

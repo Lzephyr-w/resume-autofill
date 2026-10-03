@@ -1,9 +1,9 @@
 (() => {
-  const CONTENT_PROTOCOL = 98;
+  const CONTENT_PROTOCOL = 100;
   if ((globalThis.__resumeAutofillContentProtocol || 0) > CONTENT_PROTOCOL) return;
   if (globalThis.__resumeAutofillContentListener) globalThis.chrome?.runtime?.onMessage?.removeListener(globalThis.__resumeAutofillContentListener);
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
-  document.getElementById("resume-autofill-page-action")?.setAttribute("data-content-build", "98-choice-4");
+  document.getElementById("resume-autofill-page-action")?.setAttribute("data-content-build", "100-datepicker-commit");
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
   const visible = (el) => {
     if (!el || getComputedStyle(el).visibility === "hidden") return false;
@@ -13,7 +13,7 @@
   const editable = (el) => {
     if (!el) return false;
     const choice = el.type === "radio" || el.type === "checkbox" || el.getAttribute("role") === "radio" || el.getAttribute("role") === "checkbox";
-    const customPicker = el.getAttribute("role") === "combobox" || el.hasAttribute("aria-haspopup") || /select|cascader|calendar|date|area/i.test(String(el.className || ""));
+    const customPicker = el.getAttribute("role") === "combobox" || el.hasAttribute("aria-haspopup") || /select|cascader|calendar|date|area/i.test(String(el.className || "")) || el.readOnly && !!choiceRoot(el);
     const linkedLabel = el.id && [...document.querySelectorAll(`label[for="${CSS.escape(el.id)}"]`)].some(visible) || !!el.closest("label");
     const readonlySemantic = el.readOnly && /籍贯|居住|户籍|地区|日期|时间|省|市/.test(String(el.getAttribute("aria-label") || el.placeholder || el.name || el.id || el.parentElement?.innerText || ""));
     const blockedType = ["hidden", "file", "submit", "reset", "image"].includes(el.type) || el.type === "button" && !customPicker;
@@ -22,8 +22,10 @@
       || /^(?:搜索|search|验证码|短信验证码|登录|login)(?:\b|$|职位|岗位|关键词)/i.test(clean(el.getAttribute("aria-label") || el.placeholder || el.name));
     return !excluded && (visible(el) || (choice && linkedLabel)) && !el.disabled && el.getAttribute("aria-disabled") !== "true" && (!el.readOnly || customPicker || readonlySemantic) && !blockedType;
   };
-  const fields = () => [...document.querySelectorAll("input, textarea, select, [role=combobox], [role=radio], [role=checkbox], [contenteditable='true'], [aria-haspopup]")]
+  const controlSelector = "input, textarea, select, [role=combobox], [role=radio], [role=checkbox], [contenteditable='true'], [aria-haspopup], [tabindex='0'][class*='select'], [tabindex='0'][class*='Select']";
+  const fields = () => [...document.querySelectorAll(controlSelector)]
     .filter(editable)
+    .filter((el) => el.matches("input, textarea, select, [role], [aria-haspopup], [contenteditable='true']") || ![...el.querySelectorAll(controlSelector)].some(editable))
     .filter((el, index, all) => all.indexOf(el) === index);
   const normalize = (value) => clean(value).toLowerCase().replace(/[：:（）()\[\]【】／\/\s_-]/g, "");
   const salaryRange = (value) => {
@@ -128,13 +130,18 @@
   }
   console.assert(mergeDocumentChunks(["职责：\n负责开发\n亮点：", "亮点：\n1. 优化性能\n职责："]) === "职责：\n负责开发\n亮点：\n1. 优化性能\n职责：");
 
-  const fieldLabelSelector = ".form-item__title, .form-item__label, .formItem__label, .form-label, .field-label, legend, [class*='formily-item-label'], [class*='form-item-label'], [class*='form-item__label'], [class*='formItemLabel'], [class*='formItem__label'], [class^='title-'], [class*=' title-']";
+  const fieldLabelSelector = ".form-item__title, .form-item__label, .formItem__label, .form-label, .field-label, legend, [class*='field-label'], [class*='formily-item-label'], [class*='form-item-label'], [class*='form-item__label'], [class*='formItemLabel'], [class*='formItem__label'], [class^='title-'], [class*=' title-']";
   const fieldContainer = (el) => {
     const explicit = el?.closest(".form-item, .form-group, .field, fieldset, [data-field]");
     if (explicit) return explicit;
     for (let node = el?.parentElement, depth = 0; node && depth < 12; node = node.parentElement, depth++) {
-      if (node.matches?.("[class*='form-item'], [class*='formItem'], [class*='formily-item'], [class*='field-item'], [class*='fieldItem'], [class*='apply-field'], [class*='control-group']")
-        && [...node.querySelectorAll(`${fieldLabelSelector}, label`)].some((label) => !label.contains(el) && !label.querySelector(controlSelector))) return node;
+      const fieldWrapper = node.matches?.("[class*='form-item'], [class*='formItem'], [class*='formily-item'], [class*='field-item'], [class*='fieldItem'], [class*='apply-field'], [class*='control-group'], [class*='field-control-type-'], [class$='-field'], [class*='-field ']");
+      // Keep anonymous caption lookup local; a whole-module search can claim a sibling field.
+      if (!fieldWrapper && depth > 3) continue;
+      const captions = [...node.querySelectorAll(`${fieldLabelSelector}, label`)].filter((label) => !label.contains(el) && !label.querySelector(controlSelector));
+      if (!captions.length) continue;
+      if (fieldWrapper
+        || captions.length === 1 && [...node.querySelectorAll(controlSelector)].filter(editable).filter((control) => ![...control.querySelectorAll(controlSelector)].some(editable)).length === 1) return node;
     }
     return el?.parentElement;
   };
@@ -164,12 +171,13 @@
     if (associated) return associated;
     return labelCaption(label);
   };
-  const controlSelector = "input, textarea, select, [role=combobox], [role=radio], [role=checkbox], [contenteditable='true'], [aria-haspopup]";
   const semanticText = (el) => clean([fieldTitle(el), el.getAttribute("aria-label"), el.getAttribute("placeholder"), el.name, el.id, el.getAttribute("data-label"), el.getAttribute("title"), labelCaption(el.parentElement?.querySelector("label"))].filter(Boolean).join(" "));
   const anchorMatch = (el, anchor) => {
     const wanted = [anchor, ...(typeof FIELD_ALIASES !== "undefined" ? (FIELD_ALIASES[anchor] || []) : [])].map(normalize);
     if (anchor === "证书名称" && /描述|说明|成绩|分数|时间|日期/.test(fieldTitle(el))) return false;
+    if (/^(?:获奖项|奖项名称)$/.test(anchor) && /类型|类别|描述|说明|时间|日期|级别|等级/.test(fieldTitle(el))) return false;
     if (!/学号/.test(anchor) && /学号/.test(fieldTitle(el))) return false;
+    if (anchor === "GPA" && /类型|满分|制式/.test(fieldTitle(el))) return false;
     const text = normalize(`${semanticText(el)} ${labelText(el)}`);
     return wanted.some((value) => value && text.includes(value));
   };
@@ -190,8 +198,10 @@
     }
     // Fallback for component libraries that render headings as plain div text.
     for (let node = el?.parentElement, depth = 0; node && depth < 8; node = node.parentElement, depth++) {
-      const candidate = [...(node.children || [])].map((child) => clean(child.innerText || child.textContent))
-        .find((text) => text && text !== ownTitle && text.length <= 40 && /个人信息|求职意向|教育|工作|实习|项目|语言|证书|获奖|竞赛|自我描述/.test(text));
+      const branch = [...node.children].find((child) => child === el || child.contains(el));
+      const candidate = [...node.children].filter((child) => child !== branch && (child.compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && !child.querySelector(`${controlSelector}, button, a, h1, h2, h3, h4, h5, h6, [role=heading]`)).map((child) => clean(child.innerText || child.textContent))
+        .find((text) => text && text !== ownTitle && text.length <= 80 && /基本信息|基本资料|个人信息|求职意向|教育|工作|实习|项目|语言|证书|获奖|竞赛|自我描述/.test(text));
       if (candidate) return candidate;
     }
     const previous = [...document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, [role=heading], .blockTitle, .section-title, .form-title, [class*='blockTitle'], [class*='section-title']")]
@@ -294,6 +304,8 @@
       if (current) return current;
     }
     if (row && /开始时间|结束时间|入学时间|毕业时间|教育开始|教育结束|工作开始|工作结束|项目开始|项目结束|获奖时间|获得时间/.test(label)) {
+      const fullRange = [...row.querySelectorAll("input")].map(fullDateRange).find((controls) => controls.length === 2);
+      if (fullRange) return /结束时间|毕业时间|教育结束|工作结束|项目结束/.test(label) ? fullRange[1] : fullRange[0];
       const atsxPeriod = row.querySelector(".atsx-date-picker-period-month");
       const atsxParts = atsxPeriod ? [...atsxPeriod.querySelectorAll(":scope > .atsx-date-picker-period-month-label")] : [];
       if (atsxParts.length === 2) return /结束时间|毕业时间|教育结束|工作结束|项目结束/.test(label) ? atsxParts[1] : atsxParts[0];
@@ -344,7 +356,8 @@
 
   const moduleTitle = (el) => {
     const section = sectionTitle(el);
-    if (section) return section;
+    // Numbered record captions belong to one module, rather than separate first rows.
+    if (section) return hasKnownSection(section) ? section.replace(/\s*[-－–—#]\s*\d+\s*(?:[（(].*[）)])?$/, "") : section;
     let node = el;
     for (let depth = 0; node && depth < 16; depth++, node = node.parentElement) {
       const heading = node.querySelector?.("h1, h2, h3, h4, h5, h6, legend, [role=heading], .section-title, .form-title, .title");
@@ -405,7 +418,7 @@
       const root = choiceRoot(liveControl || el);
       const scope = root?.isConnected ? root : box;
       const displays = [...(scope?.querySelectorAll("[aria-valuetext], [class]") || [])].filter((node) =>
-        node !== el && clean(node.textContent));
+        node !== el && clean(node.textContent) && !/placeholder/i.test(String(node.className || "")) && !/^请选择|^please select$/i.test(clean(node.textContent)));
       const display = displays.find((node) => /display-value|selection-item|selection[-_]+choice|single-?value|selectitem|(?:select|selector)[-_]*(?:value|tag|item)|multi-?value|selected/i.test(String(node.className || "")))
         || displays.find((node) => /calc(?:ele)?/i.test(String(node.className || "")) && !/^请选择/.test(clean(node.textContent)));
       const selectionDisplay = scope?.querySelector?.("[class*='display-value'], [class*='selectItem'], [class*='selection-item']");
@@ -423,6 +436,7 @@
   };
   // ponytail: one DOM-label heuristic covers Vue/React forms; add site selectors only when a real page needs them.
   const FIELD_ALIASES = {
+    "国家/地区": ["国籍/地区", "国家／地区", "国家地区", "国家或地区", "国家（地区）", "国家(地区)", "国家", "country/region", "countryRegion", "country"],
     "姓名": ["姓名", "名字", "真实姓名", "中文姓名"],
     "手机号码": ["手机", "手机号", "手机号码", "联系电话", "电话号码"],
     "邮箱": ["邮箱", "电子邮箱", "邮件地址", "email", "e-mail"],
@@ -436,6 +450,8 @@
     "学校名称": ["学校", "院校", "毕业院校", "就读学校", "学校名称"],
     "学院名称": ["学院", "院系", "所属学院", "学院名称"],
     "专业名称": ["专业", "所学专业", "就读专业", "主修专业", "专业名称"],
+    "GPA": ["GPA成绩", "GPA", "绩点", "平均学分绩点"],
+    "GPA类型": ["GPA类型", "绩点类型", "绩点满分", "绩点制式"],
     "最高学历": ["学历", "教育程度", "最高学历", "学位"],
     "性别": ["gender", "男女", "性别"],
     "工作经验": ["工作年限", "工作经验", "经验"],
@@ -443,9 +459,9 @@
     "所在地": ["所在地区", "当前所在地", "居住地", "所在地"],
     "期望城市": ["意向城市", "工作城市", "期望工作城市", "期望城市"],
     "期望从事行业": ["期望从事行业", "期望行业", "意向行业", "目标行业"],
-    "期望从事职业": ["期望从事职业", "期望职业", "期望职位", "意向职位", "目标职位", "意向岗位"],
+    "期望从事职业": ["期望从事职业", "期望职业", "期望职位", "意向职位", "目标职位", "目标职位类别", "意向岗位"],
     "期望月薪(税前)": ["期望月薪（税前）", "期望月薪(税前)", "期望薪资（税前）", "期望薪资(税前)", "期望月薪", "期望薪资", "期望待遇"],
-    "期望工作城市": ["期望工作城市", "期望城市", "意向城市", "工作意向城市", "期望工作地点", "期望地点"],
+    "期望工作城市": ["期望工作城市", "目标工作城市", "期望城市", "意向城市", "工作意向城市", "期望工作地点", "期望地点"],
     "现月薪(税前)": ["现月薪（税前）", "现月薪(税前)", "当前月薪（税前）", "当前月薪(税前)", "目前月薪（税前）", "目前月薪(税前)", "现月薪", "当前薪资", "目前薪资"],
     "当前薪资": ["现月薪", "当前薪资", "目前薪资"],
     "期望薪资": ["期望月薪", "期望薪资", "期望待遇"],
@@ -466,7 +482,7 @@
     "学历类型": ["培养方式", "学习方式", "就读方式", "受教育类型"],
     "工作描述": ["工作职责", "工作内容", "工作说明"],
     "工作职责": ["工作描述", "工作内容", "工作说明"],
-    "工作亮点": ["工作成果", "业绩亮点", "工作成就"],
+    "工作亮点": ["工作成果", "业绩亮点", "工作成就", "工作业绩", "亮点", "业绩"],
     "个人评价": ["个人评价", "自我评价", "自我描述", "评价内容"],
     "获奖情况": ["奖励活动", "获奖经历", "奖项"],
     "现居住地": ["当前居住地", "当前所在地", "现居地", "居住地", "所在地", "所在地点"],
@@ -485,7 +501,7 @@
     "项目职务": ["职务", "项目角色", "角色"],
     "项目职责": ["职责", "项目中职责", "个人工作"],
     "获奖项": ["获奖名称", "奖励活动", "奖项名称", "奖项", "竞赛名称"],
-    "获奖描述": ["奖励描述", "荣誉描述"],
+    "获奖描述": ["奖励描述", "荣誉描述", "奖项说明", "获奖说明"],
     "证书名称": ["证书", "资格证书"],
     "证书描述": ["描述", "说明", "证书说明"],
     "获得时间": ["获奖时间", "取得时间", "日期"],
@@ -517,6 +533,8 @@
       if (wanted.includes(normalize(fieldTitle(el).replace(/[＊*]/g, "")))) score += 250;
       if (wanted.some((value) => attrs.includes(value.replace(/名称|号码|税前/g, "")))) score += 20;
       if ((label === "现居住地" || label === "所在地") && /户口|户籍|籍贯/.test(attrs)) score = 0;
+      if (label === "GPA" && /类型|满分|制式/.test(fieldTitle(el))) score = 0;
+      if (/^(?:获奖项|奖项名称)$/.test(label) && /类型|类别|描述|说明|时间|日期|级别|等级/.test(fieldTitle(el))) score = 0;
       if (label === "籍贯" && /户口|户籍/.test(attrs)) score = 0;
       if (/^期望/.test(label) && /^(?:现|当前|目前)/.test(clean(fieldTitle(el)))) score = 0;
       if (score && el.type === "date" && /日期|时间/.test(label)) score += 5;
@@ -554,7 +572,7 @@
       el.dispatchEvent(new Event("blur", { bubbles: true }));
       return true;
     }
-    if (!["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.getAttribute("role") === "combobox") return false;
+    if (!["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.getAttribute("role") === "combobox" && !isSuggestionControl(el)) return false;
     if (el.tagName === "SELECT") {
       const options = [...el.options];
       const exact = options.find((item) => normalize(item.textContent) === normalize(value) || item.value === value);
@@ -566,6 +584,21 @@
       el.value = option.value;
       lastChoice = { ...(lastChoice || {}), selectedValue: option.value, confirmed: true };
     } else {
+      if (el.type === "number") {
+        const numeric = String(value).trim();
+        const numberPattern = /^-?(?:\d+|\d*\.\d+)(?:e[+-]?\d+)?$/i;
+        if (!numberPattern.test(numeric) || !Number.isFinite(Number(numeric))) {
+          lastChoice = { failure: "invalid-number-value" }; return false;
+        }
+        const probe = document.createElement("input"); probe.type = "number";
+        for (const attr of ["min", "max", "step"]) if (el.hasAttribute(attr)) probe.setAttribute(attr, el.getAttribute(attr));
+        const defaultNumber = el.getAttribute("value");
+        // A valid default value is the native step base when min is absent.
+        if (defaultNumber != null && numberPattern.test(defaultNumber) && Number.isFinite(Number(defaultNumber))) probe.setAttribute("value", defaultNumber);
+        probe.value = numeric;
+        if (!probe.validity.valid) { lastChoice = { failure: "number-constraint-mismatch" }; return false; }
+        value = numeric;
+      }
       if (el.type === "date" || (el.type === "text" && /日期|时间/.test(normalize(labelText(el))))) {
         const [year, month, day] = dateParts(value);
         value = year ? `${year}-${month}${day ? `-${day}` : ""}` : value;
@@ -607,17 +640,24 @@
     if (!visible(el)) return false;
     if (el.matches("[role=listbox], [role=menu], [role=dialog], [role=grid]")) return true;
     const style = getComputedStyle(el);
-    return (style.position === "fixed" || style.position === "absolute") && !!el.querySelector("[role=option], [role=checkbox], input[type=checkbox], li, [data-value], [class*='option'], [class*='Option'], [class*='item'], [class*='Item'], [class*='picker'][class*='cell']");
+    return (style.position === "fixed" || style.position === "absolute") && !!el.querySelector("[role=option], [role=checkbox], input[type=checkbox], li, [data-value], [class*='option'], [class*='Option'], [class*='item'], [class*='Item'], [class*='picker'][class*='cell'], [role=grid], table td[title]");
   };
   const openDropdowns = () => {
-    const known = [...document.querySelectorAll(popupSelector)].filter(isPopup);
+    const known = [...document.querySelectorAll(popupSelector)].filter(isPopup).map((popup) => {
+      if (!popup.matches("[role=grid]")) return popup;
+      for (let parent = popup.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+        if (isPopup(parent)) return parent;
+      }
+      return popup;
+    });
     // ponytail: scan generic fixed/absolute portals only when semantic/class hooks miss; keep normal closes cheap.
     const candidates = known.length ? known : [...document.querySelectorAll("body *")].filter(isPopup);
     return candidates.filter((popup) => !candidates.some((other) => other !== popup && other.contains(popup)));
   };
   const popupFor = (control, includeGlobal = true) => {
     const linked = control?.getAttribute?.("aria-controls") ? document.getElementById(control.getAttribute("aria-controls")) : null;
-    const popupVisible = (popup) => !!popup && !popup.hidden && (isPopup(popup) || popupOptionNodes(popup).length > 0);
+    const popupVisible = (popup) => !!popup && visible(popup) && !popup.hidden && (isPopup(popup) || popup.matches("[role=tree]")
+      || !popup.matches(controlSelector) && /dropdown|popover|options|calendar.*panel|unmodeled-layer|selector-container|autocomplete|suggest/i.test(String(popup.className || "")) && popupOptionNodes(popup).length > 0);
     const owned = [linked, control?.nextElementSibling].filter(popupVisible);
     const localRoot = choiceRoot(control)?.parentElement || control?.parentElement;
     const local = [...(localRoot?.querySelectorAll?.(popupSelector) || [])].filter(popupVisible);
@@ -653,7 +693,14 @@
       [document.activeElement, document, window].filter(Boolean).forEach((node) => node.dispatchEvent?.(event));
     }
   };
-  const closeDatePicker = (calendar, control) => closeVisibleDropdowns(control);
+  const closeDatePicker = async (calendar, control) => {
+    control = control?.isConnected ? control : resolveField(elementKeys.get(control));
+    const input = control?.matches?.("input") ? control : control?.querySelector?.("input");
+    // Some editable pickers keep their editing state open after blur/Escape.
+    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", code: "Tab", bubbles: true }));
+    input?.blur?.();
+    await closeVisibleDropdowns(control);
+  };
   const popupOptionNodes = (scope) => {
     const selector = "[role=option], li, [data-value], [class*='option'], [class*='Option'], [class*='item'], [class*='Item']";
     const text = (node) => clean(node.textContent || node.getAttribute("data-value") || node.getAttribute("value"));
@@ -795,7 +842,8 @@
   };
   const projectParts = (row) => {
     const text = String(row?.description || "").trim();
-    const marker = text.search(/\s+(?=(?:负责|实现|构建|设计|开发|使用|参与|主导))/);
+    if (row?.summary || row?.responsibilities) return { summary: row.summary || text, responsibilities: row.responsibilities || "" };
+    const marker = text.search(/(?:^|\n)\s*(?=(?:项目职责|核心职责|职责)\s*[：:])/);
     return marker > 0 ? { summary: text.slice(0, marker).trim(), responsibilities: text.slice(marker).trim() } : { summary: text, responsibilities: "" };
   };
   const clickOption = async (el, trusted = false, changed, record, plainTrusted = false) => {
@@ -975,11 +1023,14 @@
         .map((id) => clean(document.getElementById(id)?.textContent).slice(0, 100)).slice(0, 3);
       const data = Object.fromEntries([...el.attributes].filter(({ name, value }) => /^data-(?:label|field|name|title|testid|field-key)$/.test(name)
         && value.length <= 80 && !/[a-f0-9]{16}|[a-z0-9_-]{40}/i.test(value)).map(({ name, value }) => [name, value]));
-      const anchor = /教育|学历/.test(module) ? "学校名称" : /工作|实习|任职/.test(module) ? "公司名称" : /项目/.test(module) ? "项目名称" : /证书|英语/.test(module) ? "证书名称" : "";
+      const anchor = /教育|学历/.test(module) ? "学校名称" : /工作|实习|任职/.test(module) ? "公司名称" : /项目/.test(module) ? "项目名称" : /证书|英语/.test(module) ? "证书名称" : /获奖|奖励|竞赛/.test(module) ? "获奖项" : "";
       if (anchor && !moduleRows.has(module)) moduleRows.set(module, rowContainers(anchor, module));
       const rows = moduleRows.get(module) || [];
       const row = rows.find((container) => container.contains(el));
       const anchorField = row && [...row.querySelectorAll(controlSelector)].find((control) => anchorMatch(control, anchor));
+      // ponytail: a name selector follows its preceding type/category in the same record.
+      const parentChoice = isChoiceControl(el) && /名称/.test(label) && row
+        ? metadata.filter((field) => field.index < index && row.contains(field.el) && isChoiceControl(field.el) && /类型|类别/.test(field.label)).at(-1)?.el : null;
       return {
         key, index,
         label: label.slice(0, 160), labels: associatedLabels(el).slice(0, 3).map((value) => value.slice(0, 100)),
@@ -989,6 +1040,7 @@
         ariaLabelledby: references("aria-labelledby"), ariaDescribedby: references("aria-describedby"),
         required: !!el.required || el.getAttribute("aria-required") === "true", role: el.getAttribute("role") || "",
         isChoice: isChoiceControl(el),
+        dependsOn: parentChoice ? rememberField(parentChoice, controls) : "",
         rowAnchor: anchorField ? { label: anchor, value: controlValue(anchorField) } : null,
         module, repeatIndex: row ? rows.indexOf(row) : repeat, occurrence, currentValue: controlValue(el),
         type: controlType(el), options: optionTexts(el)
@@ -1025,7 +1077,13 @@
   const datePartText = (el) => clean(el?.getAttribute?.("placeholder") || el?.getAttribute?.("aria-label")).toLowerCase();
   const isYearPart = (el) => /年|year|yyyy/.test(datePartText(el));
   const isMonthPart = (el) => /月|month|^mm$/.test(datePartText(el));
+  const fullDateRange = (target) => {
+    const range = target?.closest?.("[class*='picker'][class*='range']");
+    const inputs = [...(range?.querySelectorAll("input") || [])].filter(visible);
+    return inputs.length === 2 && inputs.every((input) => /日期|时间|date|time/i.test(input.placeholder) && !isYearPart(input) && !isMonthPart(input)) ? inputs : [];
+  };
   const dateControls = (target) => {
+    if (fullDateRange(target).includes(target)) return [];
     const atsxParts = atsxPeriodParts(target);
     if (atsxParts.includes(target)) return atsxParts;
     if (!/日期|时间|年月|date|month|year|yyyy|calendar|picker/i.test(`${fieldTitle(target)} ${datePartText(target)} ${target?.className || ""} ${target?.name || ""} ${target?.id || ""}`)) return [];
@@ -1083,6 +1141,7 @@
     return actual[0] && actual[1] && wanted[0] && wanted[1] && actual[0] !== wanted[0] && actual[1] === wanted[1];
   };
   async function choose(label, value, target, skipDatePair = false, chooseOptions = {}) {
+    const finishDatePicker = (calendar, control) => chooseOptions.keepDateRangeOpen && trace.confirmed ? Promise.resolve() : closeDatePicker(calendar, control);
     if (target) rememberField(target);
     const trace = lastChoice = {
       label,
@@ -1194,26 +1253,62 @@
         trace.path = "calendar";
         const dateBox = fieldContainer(dateControl);
         const liveDateControl = () => dateControl.isConnected ? dateControl : resolveField(elementKeys.get(dateControl));
-        liveDateControl()?.scrollIntoView?.({ block: "center", inline: "nearest" });
+        if (!chooseOptions.keepExistingCalendar) liveDateControl()?.scrollIntoView?.({ block: "center", inline: "nearest" });
         await wait(80);
         const dateInput = liveDateControl()?.matches?.("input") ? liveDateControl() : liveDateControl()?.querySelector?.("input");
+        const priorDatePopups = new Set(openDropdowns());
         (dateInput || liveDateControl())?.focus?.({ preventScroll: true });
-        await clickOption(dateInput || liveDateControl());
         await wait(80);
         const rect = dateControl.getBoundingClientRect();
-        const popupRoots = () => popupFor(liveDateControl() || dateControl);
-        const calendarIsOpen = () => popupRoots().some((popup) => popup.matches?.("[class*='calendar'], [class*='Calendar']")
-          || popup.querySelector?.("[class*='calendar'], [class*='Calendar'], [role=grid]"));
-        await waitFor(calendarIsOpen, 1400);
-        const popupNodes = () => [...new Set(popupRoots().flatMap((popup) => [popup, ...popup.querySelectorAll("*")]))].filter(visible);
+        const popupDistance = (popup) => { const r = popup.getBoundingClientRect(); return Math.abs(r.left - rect.left) + Math.min(Math.abs(r.top - rect.bottom), Math.abs(r.bottom - rect.top)); };
+        const popupRoots = () => popupFor(liveDateControl() || dateControl).filter((popup) => isPopup(popup) && !/leave|exit/.test(String(popup.className || ""))).sort((a, b) => {
+          return Number(priorDatePopups.has(a)) - Number(priorDatePopups.has(b)) || popupDistance(a) - popupDistance(b);
+        }).slice(0, 1);
         const exactText = (node) => clean(node?.innerText || node?.textContent || node?.getAttribute?.("aria-label") || node?.getAttribute?.("title") || node?.getAttribute?.("data-value") || node?.getAttribute?.("value"));
         const dateText = (node) => exactText(node).replace(/\s/g, "");
         const exactNodes = (scope, pattern) => [...scope.querySelectorAll("*")].filter((node) => {
           const text = dateText(node);
           return visible(node) && pattern.test(text) && ![...node.children].some((child) => visible(child) && dateText(child) === text);
         });
-        const visibleMonthNodes = [...new Set([...exactNodes(document.body, /^(?:0?[1-9]|1[0-2])月$/), ...popupRoots().flatMap(popupOptionNodes).filter((node) => /^(?:0?[1-9]|1[0-2])月$/.test(dateText(node)))])];
-        const visibleYearNodes = exactNodes(document.body, /^\d{4}年?$/);
+        const calendarIsOpen = () => popupRoots().some((popup) => popup.matches?.("[class*='calendar'], [class*='Calendar']")
+          || popup.querySelector?.("[class*='calendar'], [class*='Calendar'], [role=grid], table td[title]")
+          || new Set(exactNodes(popup, /^(?:0?[1-9]|1[0-2])月$/).map(dateText)).size >= 6);
+        // Focus can open the picker. Clicking again would close it and expose another field's portal.
+        const focusOpened = calendarIsOpen() && popupRoots().some((popup) => !priorDatePopups.has(popup) || popupDistance(popup) < 48);
+        if (!focusOpened && !(chooseOptions.keepExistingCalendar && openDropdowns().some((popup) => popup.querySelector("table, [role=grid]")))) await clickOption(dateInput || liveDateControl());
+        if (!await waitFor(calendarIsOpen, 1400)) {
+          await clickOption(dateInput || liveDateControl(), true, calendarIsOpen);
+          await waitFor(calendarIsOpen, 1400);
+        }
+        const invalidYearList = () => popupRoots().some((popup) => {
+          const numbers = exactNodes(popup, /^-?\d{1,4}$/).map(dateText);
+          return numbers.length >= 6 && numbers.some((text) => Number(text) <= 0) && !numbers.some((text) => /^\d{4}$/.test(text));
+        });
+        const reopenYearList = invalidYearList();
+        if (reopenYearList) {
+          // Focus can mount a cached year list before its anchor is initialized.
+          // End editing before reopening; blur alone can leave the cached panel mounted.
+          await closeDatePicker(null, liveDateControl());
+          await waitFor(() => !calendarIsOpen(), 400);
+          (liveDateControl()?.querySelector?.("input") || liveDateControl())?.focus?.({ preventScroll: true });
+          await wait(80);
+          if (!calendarIsOpen()) await clickOption(liveDateControl(), true, calendarIsOpen);
+          await waitFor(() => calendarIsOpen() && !invalidYearList(), 1400);
+        }
+        const popupNodes = () => [...new Set(popupRoots().flatMap((popup) => [popup, ...popup.querySelectorAll("*")]))].filter(visible);
+        const visibleMonthNodes = [...new Set(popupRoots().flatMap((popup) => [...exactNodes(popup, /^(?:0?[1-9]|1[0-2])月$/), ...popupOptionNodes(popup).filter((node) => /^(?:0?[1-9]|1[0-2])月$/.test(dateText(node)))]))];
+        const visibleYearNodes = popupRoots().flatMap((popup) => {
+          const years = exactNodes(popup, /^\d{4}年?$/);
+          if (years.length) return years;
+          // A month portal may render its year header as a separate sibling.
+          const anchor = popup.getBoundingClientRect();
+          const headers = [...(popup.parentElement?.children || [])].filter((node) => {
+            const box = node.getBoundingClientRect(); const position = getComputedStyle(node).position;
+            return node !== popup && visible(node) && /fixed|absolute/.test(position) && !/leave|exit/.test(String(node.className || ""))
+              && !node.querySelector(controlSelector) && Math.abs(box.left - anchor.left) < 40 && Math.abs(box.bottom - anchor.top) < 80;
+          }).flatMap((node) => exactNodes(node, /^\d{4}年?$/));
+          return headers.length === 1 ? headers : [];
+        });
         const panelCandidates = [...new Set([...popupRoots(), ...visibleMonthNodes].flatMap((popup) => {
           const parents = [];
           for (let node = popup; node && node !== document.body; node = node.parentElement) parents.push(node);
@@ -1222,7 +1317,7 @@
         const monthPanelDetails = panelCandidates.map((panel) => {
           const monthNodes = visibleMonthNodes.filter((node) => panel.contains(node));
           const yearNodes = visibleYearNodes.filter((node) => panel.contains(node));
-          return { panel, monthNodes, yearTitle: yearNodes.find((node) => node.matches?.("button, [role=button], [title], [aria-label], [class*='year'], [class*='Year']")) || (yearNodes.length === 1 ? yearNodes[0] : null) };
+          return { panel, monthNodes, yearTitle: yearNodes.find((node) => /年$/.test(dateText(node))) || yearNodes.find((node) => node.matches?.("button, [role=button], [title], [aria-label], [class*='year'], [class*='Year']")) || (yearNodes.length === 1 ? yearNodes[0] : null) };
         }).filter(({ monthNodes, yearTitle }) => new Set(monthNodes.map(dateText)).size >= 6 && yearTitle).sort((a, b) => {
           if (a.panel.contains(b.panel)) return 1;
           if (b.panel.contains(a.panel)) return -1;
@@ -1243,36 +1338,64 @@
             const center = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - rect.left) + Math.abs(r.top - rect.top); };
             return center(a) - center(b);
           })[0] || popupRoots().find((popup) => exactNodes(popup, /^(?:0?[1-9]|1[0-2])月$/).length >= 6) || monthPanel;
-        trace.datePicker = { protocol: CONTENT_PROTOCOL, popupCount: popupRoots().length, panelFound: !!monthPanel, monthCount: monthPanelDetails ? new Set(monthPanelDetails.monthNodes.map(dateText)).size : 0 };
+        trace.datePicker = { protocol: CONTENT_PROTOCOL, popupCount: popupRoots().length, panelFound: !!monthPanel, monthCount: monthPanelDetails ? new Set(monthPanelDetails.monthNodes.map(dateText)).size : 0, reopenedYearList: reopenYearList };
+        if (reopenYearList && invalidYearList()) {
+          trace.failure = "year-option-not-visible";
+          await finishDatePicker(monthPanel, liveDateControl());
+          return false;
+        }
         if (monthPanel) {
           const yearTitle = monthPanelDetails.yearTitle;
           const currentYear = Number(dateText(yearTitle).match(/^\d{4}/)?.[0]);
           const targetYear = Number(year);
           if (!Number.isFinite(currentYear)) {
             trace.failure = "current-year-not-found";
-            await closeDatePicker(monthPanel, dateControl);
+            await finishDatePicker(monthPanel, dateControl);
             return false;
           }
           const direction = targetYear < currentYear ? "prev" : "next";
           const pickerNodes = () => { const panel = liveMonthPanel(); return [...new Set([panel, ...(panel?.querySelectorAll("*") || []), ...popupNodes()])].filter(visible); };
           const yearButton = () => [...(liveMonthPanel()?.querySelectorAll("a, button, [role=button]") || [])].find((el) => `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`.match(new RegExp(`${direction}.*year`, "i")));
           Object.assign(trace.datePicker, { currentYear, targetYear });
-          if (targetYear !== currentYear && yearButton()) {
+          const shownYears = visibleYearNodes.filter((node) => node !== yearTitle && [String(targetYear), `${targetYear}年`].includes(dateText(node))
+            && !node.closest("[disabled], [aria-disabled=true], [class*='disabled']"));
+          if (targetYear !== currentYear && shownYears.length === 1) {
+            trace.datePicker.yearMethod = "visible-option";
+            await clickOption(shownYears[0]); await wait(40);
+          } else if (targetYear !== currentYear && yearButton()) {
             trace.datePicker.yearMethod = direction;
             for (let i = 0; i < Math.abs(targetYear - currentYear); i++) { yearButton()?.click(); await wait(30); }
           } else if (targetYear !== currentYear && yearTitle) {
-            trace.datePicker.yearMethod = "title";
-            yearTitle.click();
+            const yearListOpen = exactNodes(liveMonthPanel(), /^\d{4}年?$/).filter((node) => node !== yearTitle).length >= 6;
+            if (!yearListOpen && exactNodes(liveMonthPanel(), /^-?\d{1,4}$/).length >= 6) {
+              trace.failure = "year-option-not-visible";
+              await finishDatePicker(monthPanel, dateControl);
+              return false;
+            }
+            trace.datePicker.yearMethod = yearListOpen ? "late-option" : "title";
+            if (!yearListOpen) yearTitle.click();
             const yearOption = await waitFor(() => pickerNodes().find((node) => [String(targetYear), `${targetYear}年`].includes(dateText(node))), 1400);
             trace.datePicker.yearOptionFound = !!yearOption;
             if (!yearOption) {
               trace.failure = "year-not-found";
-              await closeDatePicker(monthPanel, dateControl);
+              await finishDatePicker(monthPanel, dateControl);
               return false;
             }
             yearOption.click(); await wait(40);
           } else trace.datePicker.yearMethod = "already-current";
-          const monthNode = await waitFor(() => exactNodes(liveMonthPanel() || document.body, /^(?:0?[1-9]|1[0-2])月$/).find((node) => Number(dateText(node).replace(/月$/, "")) === Number(month)), 1400);
+          // Year selection can asynchronously rebuild the month grid. Wait for its header before clicking a month.
+          if (!await waitFor(() => {
+            const headers = yearTitle.isConnected ? [] : pickerNodes().filter((node) => node.tagName === yearTitle.tagName
+              && String(node.className) === String(yearTitle.className) && /^\d{4}年?$/.test(dateText(node)));
+            const header = yearTitle.isConnected ? yearTitle : headers.length === 1 ? headers[0] : null;
+            return Number(dateText(header).replace(/年$/, "")) === targetYear;
+          }, 1400)) {
+            trace.failure = "year-change-not-confirmed";
+            await finishDatePicker(liveMonthPanel(), liveDateControl());
+            return false;
+          }
+          const monthNode = await waitFor(() => exactNodes(liveMonthPanel() || document.body, /^(?:0?[1-9]|1[0-2])月$/).find((node) => Number(dateText(node).replace(/月$/, "")) === Number(month)
+            && !node.closest('[disabled], [aria-disabled=true], [data-disabled=true], [class*="disabled"]')), 1400);
           trace.datePicker.month = Number(month);
           trace.datePicker.monthFound = !!monthNode;
           if (monthNode) monthNode.click();
@@ -1282,18 +1405,22 @@
           trace.afterConfirm = trace.datePicker.after = controlValue(liveDateControl());
           if (!trace.confirmed) trace.failure = monthNode ? "display-not-confirmed" : "month-not-found";
           logChoice("calendar", trace, choiceState(liveDateControl(), liveMonthPanel(), monthNode));
-          await closeDatePicker(liveMonthPanel(), liveDateControl());
+          await finishDatePicker(liveMonthPanel(), liveDateControl());
           return trace.confirmed;
         }
-        const visibleCalendar = () => [...document.querySelectorAll("[role=grid]")].filter((el) => visible(el) && popupRoots().some((popup) => popup === el || popup.contains(el))).sort((a, b) => {
+        const visibleCalendar = () => popupRoots().flatMap((popup) => [...popup.querySelectorAll("[role=grid], table"), ...(popup.matches("[role=grid], table") ? [popup] : [])]).filter((el) => visible(el) && el.querySelector("td, [role=gridcell]")).sort((a, b) => {
           const center = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - rect.left) + Math.abs(r.top - rect.top); };
           return center(a) - center(b);
         })[0];
         let calendar = visibleCalendar();
         if (calendar) {
+          trace.datePicker.panelFound = true;
+          trace.datePicker.mode = "table";
           const panelFor = (grid) => {
             let panel = grid;
-            while (panel.parentElement && panel !== document.body && !panel.querySelector("[class*='prev-year'], [class*='previous-year'], [aria-label*='previous year' i], [aria-label*='prev year' i]")) panel = panel.parentElement;
+            const owner = popupRoots().find((popup) => popup === grid || popup.contains(grid));
+            if (!owner) return grid;
+            while (panel.parentElement && panel !== owner && !panel.querySelector("[class*='prev-year'], [class*='previous-year'], [class*='super-prev'], [aria-label*='previous year' i], [aria-label*='prev year' i]")) panel = panel.parentElement;
             return panel;
           };
           let calendarPanel = panelFor(calendar);
@@ -1301,15 +1428,16 @@
             .map((el) => clean(el.textContent || el.getAttribute("aria-label") || el.getAttribute("title"))).find((text) => /\d{4}/.test(text))?.match(/\d{4}/)?.[0]);
           const targetYear = Number(year);
           const yearDirection = targetYear < currentYear ? "prev" : "next";
-          const navigation = (direction, unit) => [...calendarPanel.querySelectorAll("a, button, [role=button]")].find((el) => `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`.match(new RegExp(`${direction}.*${unit}`, "i")));
+          const navigation = (direction, unit) => [...new Set([...calendarPanel.querySelectorAll("a, button, [role=button]"), ...popupRoots().flatMap((popup) => [...popup.querySelectorAll("a, button, [role=button]")])])].find((el) => !el.disabled && visible(el) && (new RegExp(`${direction}.*${unit}`, "i").test(`${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`)
+            || new RegExp(unit === "year" ? `super-${direction}` : `header-${direction}-btn`).test(String(el.className || ""))));
           if (!Number.isFinite(currentYear) || (targetYear !== currentYear && !navigation(yearDirection, "year"))) {
             trace.failure = "calendar-year-navigation-unavailable";
-            await closeDatePicker(calendar, dateControl);
+            await finishDatePicker(calendar, dateControl);
             return false;
           }
           for (let i = 0; i < Math.abs(targetYear - currentYear); i++) {
             const button = navigation(yearDirection, "year");
-            if (!button) { trace.failure = "calendar-year-navigation-lost"; await closeDatePicker(calendar, dateControl); return false; }
+            if (!button) { trace.failure = "calendar-year-navigation-lost"; await finishDatePicker(calendar, dateControl); return false; }
             button.click(); await wait(30);
             calendar = visibleCalendar() || calendar;
             calendarPanel = panelFor(calendar);
@@ -1321,12 +1449,12 @@
           const monthDirection = targetMonth < currentMonth ? "prev" : "next";
           if (!Number.isFinite(currentMonth) || (targetMonth !== currentMonth && !navigation(monthDirection, "month"))) {
             trace.failure = "calendar-month-navigation-unavailable";
-            await closeDatePicker(calendar, dateControl);
+            await finishDatePicker(calendar, dateControl);
             return false;
           }
           for (let i = 0; i < Math.abs(targetMonth - currentMonth); i++) {
             const button = navigation(monthDirection, "month");
-            if (!button) { trace.failure = "calendar-month-navigation-lost"; await closeDatePicker(calendar, dateControl); return false; }
+            if (!button) { trace.failure = "calendar-month-navigation-lost"; await finishDatePicker(calendar, dateControl); return false; }
             button.click(); await wait(30);
             calendar = visibleCalendar() || calendar;
             calendarPanel = panelFor(calendar);
@@ -1343,10 +1471,12 @@
             calendarInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
             return !!await waitFor(() => dateValueMatches(liveDateControl(), sourceDay ? value : formatted), 800);
           };
-          const dayCell = [...calendar.querySelectorAll("[role=gridcell], td, [role=option], button, [class*='cell'], [class*='Cell']")].find((el) => !/(?:prev|previous|next|other|last)[-_ ]?month|outside/i.test(String(el.className || "")) && normalize(el.textContent) === normalize(String(Number(day))));
-          const dayNode = dayCell?.querySelector("button, [role=button], [class*='date'], [class*='Date']") || dayCell;
+          const dayCell = [...calendar.querySelectorAll("[role=gridcell], td, [role=option], button, [class*='cell'], [class*='Cell']")].map((el) => el.closest("td, [role=gridcell]") || el).find((el) => !el.disabled && el.getAttribute("aria-disabled") !== "true" && !/disabled|(?:prev|previous|next|other|last)[-_ ]?month|outside/i.test(String(el.className || ""))
+            && (!el.getAttribute("title") || el.getAttribute("title") === `${year}-${pad2(month)}-${pad2(day)}`) && normalize(el.textContent) === normalize(String(Number(day))));
+          const dayNode = dayCell?.querySelector("button, [role=button], [class*='date'], [class*='Date'], [class*='cell-inner']") || dayCell;
+          trace.datePicker.dayFound = !!dayNode;
           if (dayNode) {
-            dayNode.click();
+            await clickOption(dayNode);
             await wait(40);
             trace.datePicker.day = Number(day);
             trace.datePicker.dayDefaulted = !sourceDay;
@@ -1354,14 +1484,14 @@
             if (!trace.confirmed) trace.confirmed = await commitCalendarInput();
             if (!trace.confirmed) trace.failure = "display-not-confirmed";
             trace.afterConfirm = controlValue(liveDateControl());
-            await closeDatePicker(calendar, liveDateControl());
+            await finishDatePicker(calendar, liveDateControl());
             return trace.confirmed;
           }
           if (calendarInput) {
             trace.confirmed = await commitCalendarInput();
             if (!trace.confirmed) trace.failure = "display-not-confirmed";
             trace.afterConfirm = controlValue(liveDateControl());
-            await closeDatePicker(calendar, liveDateControl());
+            await finishDatePicker(calendar, liveDateControl());
             return trace.confirmed;
           }
         }
@@ -1425,6 +1555,19 @@
     }
     if (isLocationPicker) {
       const location = String(value).trim().match(/^(.+?(?:省|自治区|特别行政区|市))[\/／,，\s-]*(.+?(?:市|区|县))$/);
+      const regions = options();
+      const province = location && regions.find((option) => sameArea(clean(option.textContent), location[1]));
+      // A flat province menu can accept only the explicitly supplied parent region.
+      if (province && popup && regions.filter((option) => /省$/.test(clean(option.textContent))).length >= 3
+        && !regions.some((option) => sameArea(clean(option.textContent), location[2]))
+        && !popup?.querySelector("[role=tree], [role=treeitem], [aria-haspopup], [class*='cascader'], [class*='switcher'], [class*='expand']")) {
+        trace.option = trace.selectedValue = clean(province.textContent);
+        await clickOption(selectionTarget(province));
+        await closeVisibleDropdowns(control);
+        trace.confirmed = !!await waitFor(() => valueMatches(readControl(), trace.selectedValue, label), 800);
+        if (!trace.confirmed) trace.failure = "province-display-not-confirmed";
+        return trace.confirmed;
+      }
       const areaPopup = await waitFor(() => [popup, ...openDropdowns(), ...document.querySelectorAll("[role=dialog], [class*='area'], [class*='cascader'], [class*='popper'], [class*='popover']")]
         .find((el) => el && visible(el) && (el.querySelector('input[placeholder="搜索"], input[placeholder*="搜"], [role=tree]') || /select-tree-dropdown|全部省市|已选地区|选择地区/.test(`${el.className} ${clean(el.innerText || el.textContent)}`))));
       const companyHint = (() => {
@@ -1779,16 +1922,14 @@
     }
     trace.confirmFound = !!confirm;
     const committedControl = control.isConnected ? control : resolveField(elementKeys.get(control));
-    // A Phoenix multi-select keeps an empty search input beside its tags.
-    // Dispatching change on that input after confirm clears the just-selected value.
-    if (!multiSelector && committedControl && committedControl.tagName !== "SELECT" && isChoiceControl(committedControl)) {
-      committedControl.dispatchEvent(new Event("input", { bubbles: true }));
-      committedControl.dispatchEvent(new Event("change", { bubbles: true }));
-      committedControl.dispatchEvent(new Event("blur", { bubbles: true }));
-    }
+    // The option click commits component state; synthetic change on its container can clear dependent choices.
     // Component state can render after its click handler returns. Verify the
     // displayed value before closing the popup, rather than cancelling it early.
     const autocomplete = isAutocompleteControl(control);
+    if (autocomplete) {
+      committedControl?.blur?.();
+      await closeVisibleDropdowns(committedControl || control);
+    }
     const expectedDisplay = year && month && pairIndex < 0 ? value : trace.selectedValue || value;
     trace.confirmed = !!await waitFor(() => valueMatches(readControl(), expectedDisplay, label)
       && (!searchSelect || !selectedBefore && selectedOption())
@@ -1811,6 +1952,7 @@
   const valueMatches = (actual, expected, label = "") => {
     const a = normalize(actual); const e = normalize(expected);
     if (!a || !e) return false;
+    if (/描述|职责|简介|摘要|工作内容|亮点|业绩/.test(label)) return a === e;
     if (a === e || a.includes(e) || e.includes(a)) return true;
     if (/获奖级别/.test(label) && normalize(awardScope(actual)) === normalize(awardScope(expected))) return true;
     if (/薪|工资|待遇/.test(label)) {
@@ -1826,17 +1968,21 @@
       && (!expectedDate[2] || !actualDate[2] || actualDate[2] === expectedDate[2]);
   };
   async function applyValue(label, value, target, applyOptions = {}) {
+    lastChoice = null;
     if (!target || value == null || value === "") return false;
     const handle = rememberField(target);
     const originalBox = fieldContainer(target);
-    lastChoice = null;
     // A year/month range is a set of select controls even when its internal
     // inputs look editable.  Do not write a full date into one part.
     // A source may state only a year. Select that known part and leave the
     // month empty rather than trying to write a complete date into one Select.
     const splitDate = dateParts(value).length >= 1 && dateControls(target).length >= 2;
     const autocompleteText = isAutocompleteControl(target);
-    const changed = splitDate ? await choose(label, value, target, false, applyOptions)
+    const range = fullDateRange(target);
+    const pendingEnd = range[0] === target && applyOptions.rangeEnd && !controlValue(range[1]);
+    const changed = pendingEnd ? await choose(label, value, target, false, { ...applyOptions, keepDateRangeOpen: true })
+        && await choose("结束时间", applyOptions.rangeEnd, range[1], false, { ...applyOptions, keepExistingCalendar: true })
+      : splitDate ? await choose(label, value, target, false, applyOptions)
       : autocompleteText ? await writeAndObserveSuggestion(label, value, target, applyOptions)
         : target.tagName === "INPUT" && !isChoiceControl(target) ? await writeAndObserveSuggestion(label, value, target, applyOptions)
           : setValue(target, value) || await choose(label, value, target, false, applyOptions);
@@ -1848,7 +1994,7 @@
     if (!relocated && !displayOnly) return false;
     target = relocated || target;
     if (target.getAttribute("aria-invalid") === "true" || target.validity && !target.validity.valid) return false;
-    const selected = lastChoice?.selectedValue || value;
+    const selected = pendingEnd ? value : lastChoice?.selectedValue || value;
     if (valueMatches(controlValue(target, originalBox), selected, label)) return true;
     const parts = dateParts(value); const controls = dateControls(target); const index = controls.indexOf(target);
     if (index >= 0 && parts.length >= 2) {
@@ -1866,7 +2012,8 @@
       const atsxRows = section ? [...document.querySelectorAll(".createFormSection-repeatable")]
         .filter((node) => sectionNames.some((name) => name && normalize(node.querySelector(".createFormSection-text")?.textContent).includes(name)))
         .reduce((total, node) => Math.max(total, node.querySelectorAll(".resumeEditForm-item").length), 0) : 0;
-      return Math.max(atsxRows, rowContainers(anchor, section).length, (scoped.length ? scoped : matches).length);
+      const owned = section ? scoped.length ? scoped : matches.filter((el) => !hasKnownSection(sectionTitle(el))) : matches;
+      return Math.max(atsxRows, rowContainers(anchor, section).length, owned.length);
     };
     const buttonInSection = (el) => {
       if (!section) return true;
@@ -1875,6 +2022,8 @@
       return !hasKnownSection(title) || sectionNames.some((name) => title.includes(name));
     };
     let existing = countFields();
+    // Existing controls without a recognized row anchor have ambiguous ownership.
+    if (!existing && section && fields().some((el) => hasKnownSection(sectionTitle(el)) && inSection(el, section))) return 0;
     let clicks = 0;
     while (existing < count && clicks < count * 2) {
       const wanted = normalize(label);
@@ -1925,7 +2074,7 @@
     const languages = await addRows("语言能力", counts?.languages || counts?.english || 0, "语言类型", [/添加.*语言.*能力/], "语言能力");
     const work = await addRows("工作经历", counts?.work || 0, "公司名称", [/添加.*工作.*经历/], "工作经历");
     const internships = await addRows("实习经历", counts?.internships || 0, "公司名称", [/添加.*实习.*经历/], "实习经历");
-    const projects = await addRows("项目经历", counts?.projects || 0, "项目名称", [/添加.*项目.*经历/], "项目经验");
+    const projects = await addRows("项目经历", counts?.projects || 0, "项目名称", [/(?:添加|新增).*项目.*(?:经历|经验)/], "项目经验");
     const cadres = await addRows("学生干部经历", counts?.cadres || 0, "职务", [/添加.*(?:学生|干部|校园|社团).*经历/], "学生干部经历");
     const englishCertificates = await addRows("英语能力", counts?.englishCertificates || 0, "证书名称", [/添加.*英语.*能力/], "英语能力");
     const certificates = await addRows("证书", counts?.certificates || 0, "证书名称", [/添加.*证书/], "证书");
@@ -1943,7 +2092,11 @@
       if (field && value != null && value !== "" && !controlValue(field)) expectedEmpty.set(rememberField(field), { value, label });
     };
     const formatNumberedText = (value) => String(value || "").replace(/(^|\n)\s*(\d+)[.、)]\s*\n\s*/g, "$1$2. ");
-    const mergedWorkText = (row) => [row?.description, row?.highlights].filter(Boolean).map(formatNumberedText).join("\n");
+    const mergedWorkText = (row) => {
+      const duties = formatNumberedText(row?.description).replace(/^\s*(?:工作内容|工作描述|工作职责|职责)\s*[：:]\s*/, "").trim();
+      const highlights = formatNumberedText(row?.highlights).replace(/^\s*(?:亮点|工作亮点|工作业绩|工作成果|业绩亮点|工作成就)\s*[：:]\s*/, "").trim();
+      return [duties && `职责：\n${duties}`, highlights && `亮点：\n${highlights}`].filter(Boolean).join("\n");
+    };
     const usedFields = new Set();
     const deferredFields = [];
     const deferChoice = (field) => {
@@ -1962,7 +2115,7 @@
     const hasInternshipSection = hasSection("实习经历");
     const workRows = hasInternshipSection ? (profile.work || []) : allExperienceRows;
     const internshipRows = hasInternshipSection ? (profile.internships?.length ? profile.internships : (profile.work || []).filter((row) => /实习|intern/i.test(`${row?.workType || ""} ${row?.title || ""}`))) : [];
-    const simple = [["姓名", profile.name], ["手机号码", profile.phone], ["邮箱", profile.email], ["出生日期", profile.birthDate], ["年龄", profile.age], ["民族", profile.nationality], ["政治面貌", profile.politicalStatus], ["户口所在地", profile.householdRegistration], ["工作经验", profile.workExperience], ["籍贯", profile.nativePlace], ["现居住地", profile.currentResidence], ["微信号", profile.wechat], ["最近公司", allExperienceRows[0]?.company], ["当前就读学校学号", profile.education?.[0]?.studentId], ["兴趣爱好", profile.extras?.hobbies], ["特长", profile.extras?.specialty], ["个人评价", profile.extras?.selfEvaluation], ["获奖经历", profile.extras?.awards], ["学生干部经历", profile.extras?.studentCadres]];
+    const simple = [["姓名", profile.name], ["手机号码", profile.phone], ["邮箱", profile.email], ["出生日期", profile.birthDate], ["年龄", profile.age], ["民族", profile.nationality], ["国家/地区", profile.countryRegion], ["政治面貌", profile.politicalStatus], ["户口所在地", profile.householdRegistration], ["工作经验", profile.workExperience], ["籍贯", profile.nativePlace], ["现居住地", profile.currentResidence], ["微信号", profile.wechat], ["最近公司", allExperienceRows[0]?.company], ["当前就读学校学号", profile.education?.[0]?.studentId], ["兴趣爱好", profile.extras?.hobbies], ["特长", profile.extras?.specialty], ["个人评价", profile.extras?.selfEvaluation], ["获奖经历", profile.extras?.awards], ["学生干部经历", profile.extras?.studentCadres]];
     for (const [label, value] of simple) {
       if (!value) continue;
       const field = findField(label);
@@ -2005,6 +2158,24 @@
       experienceLocationSources: allExperienceRows.map((row) => !!row?.location),
       structuredAttempts: [], targetFields: [], experienceLocations: []
     };
+    const highestRows = (profile.education || []).filter((row) => degreeRank(row?.degree) > 0 && degreeRank(row.degree) === degreeRank(highestDegree));
+    for (const [label, key] of [["最高学历学校", "school"], ["最高学历专业", "major"], ["最高学历毕业日期", "end"], ["预计毕业时间", "end"]]) {
+      const targets = fields().filter((field) => normalize(fieldTitle(field).replace(/[＊*]/g, "")) === normalize(label));
+      if (!targets.length) continue;
+      const detail = { label, section: "最高学历", row: 1 };
+      if (targets.length !== 1 || highestRows.length !== 1) {
+        diagnostics.structuredAttempts.push({ ...detail, reason: "ambiguous-highest-education" }); continue;
+      }
+      const field = targets[0]; const value = highestRows[0][key];
+      if (!value) { diagnostics.structuredAttempts.push({ ...detail, reason: "profile-value-missing" }); continue; }
+      noteEmpty(field, value, label);
+      if (controlValue(field)) {
+        skippedFields.push(label); diagnostics.structuredAttempts.push({ ...detail, reason: "page-value-protected", matchesSource: valueMatches(controlValue(field), value, label) }); continue;
+      }
+      if (await applyValue(label, value, field)) {
+        usedFields.add(field); filled++; filledFields.push(label); diagnostics.structuredAttempts.push({ ...detail, reason: "filled", choice: lastChoice });
+      } else { missing++; missingFields.push(label); diagnostics.structuredAttempts.push({ ...detail, reason: "page-option-or-validation-failed", choice: lastChoice }); }
+    }
     for (const [label, value] of intent) {
       if (!value) continue;
       const field = findField(label);
@@ -2061,7 +2232,7 @@
       return [...matched.map((row) => row === undefined ? remaining.shift() : row), ...remaining];
     };
     const groups = [
-      [profile.education, [["学校名称", "school"], ["学院名称", "college"], ["专业名称", "major"], ["学历", "degree"], ["开始时间", "start"], ["结束时间", "end"], ["学历类型", "training"], ["GPA", "gpa"], ["成绩排名", "rank"]], "学校名称", "教育背景"],
+      [profile.education, [["学校名称", "school"], ["学院名称", "college"], ["专业名称", "major"], ["学历", "degree"], ["开始时间", "start"], ["结束时间", "end"], ["学历类型", "training"], ["GPA类型", "gpaType"], ["GPA", "gpa"], ["成绩排名", "rank"]], "学校名称", "教育背景"],
       [englishCertificates, certificateMapping, "证书名称", "英语能力"],
       [certificates, certificateMapping, "证书名称", "证书"],
       [profile.skills, [["技能名称", "name"], ["掌握程度", "proficiency"], ["使用时间总计", "duration"], ["技能描述", "description"]], "技能名称", "技能"],
@@ -2070,7 +2241,7 @@
       [internshipRows, [["公司名称", "company"], ["所在部门", "department"], ["职位名称", "title"], ["工作性质", "workType"], ["开始时间", "start"], ["结束时间", "end"], ["月薪(税前)", "salary"], ["工作地点", "location"], ["离职原因", "reason"], ["工作描述", "description"], ["工作职责", "description"], ["工作亮点", "highlights"]], "公司名称", "实习经历"],
       [profile.projects, [["项目名称", "name"], ["项目职务", "role"], ["项目职责", "responsibilities"], ["开始时间", "start"], ["结束时间", "end"], ["项目链接", "link"], ["项目描述", "description"]], "项目名称", "项目经验"],
       [profile.cadres, [["职务", "position"], ["级别", "level"], ["开始时间", "start"], ["结束时间", "end"], ["工作职责", "duty"]], "职务", "学生干部经历"],
-      [profile.awards, [["获奖项", "name"], ["获奖时间", "date"], ["获奖级别", "level"], ["获奖描述", "description"]], "获奖项", "获奖经历"]
+      [profile.awards, [["获奖类型", "_type"], ["获奖项", "name"], ["获奖时间", "date"], ["获奖级别", "level"], ["获奖描述", "description"]], "获奖项", "获奖经历"]
     ];
     for (const [sourceRows, mapping, anchor, section] of groups) {
       const rows = alignRows(sourceRows, mapping, anchor, section);
@@ -2080,18 +2251,35 @@
         const parts = anchor === "项目名称" ? projectParts(row) : null;
         let startDateConfirmed = true;
         let languageTypeConfirmed = anchor !== "语言类型";
+        let awardTypeConfirmed = anchor !== "获奖项" || !rowField(anchor, index, "获奖类型", section);
+        const gpaFraction = String(row.gpa || "").trim().match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+        const explicitScale = gpaFraction && Number.isFinite(Number(gpaFraction[1])) && Number.isFinite(Number(gpaFraction[2])) && Number(gpaFraction[2]) > 0 && Number(gpaFraction[1]) <= Number(gpaFraction[2]) ? `${Number(gpaFraction[2])}分制` : "";
+        const gpaScaleAgrees = explicitScale && [row.gpaType, row.gpaScale].every((type) => !type || normalize(type) === normalize(explicitScale));
+        const gpaType = row.gpaType || row.gpaScale || explicitScale;
         for (const [label, key] of mapping) {
           let value = key === "_exam" ? certificateExam(row?.name)
+            : key === "_type" ? row?.type || row?.category || row?.name
             : key === "_score" ? certificateScore(row)
             : label === "项目职责" ? row?.responsibilities || parts?.responsibilities
             : label === "项目描述" ? parts?.summary || row?.summary || row?.description
             : label === "成绩排名" ? row?.rank || String(row?.gpa || "").match(/\d+(?:\.\d+)?\s*%/)?.[0]
+            : label === "GPA类型" ? gpaType
+            : label === "GPA" && gpaScaleAgrees ? gpaFraction[1]
             : label === "工作性质" ? row?.workType || (/实习|intern/i.test(String(row?.title || "")) ? "实习" : "")
             : label === "获奖级别" ? awardLevel(row)
-            : (sourceRows === workRows || sourceRows === internshipRows) && (label === "工作描述" || label === "工作职责") ? mergedWorkText(row)
+            : (sourceRows === workRows || sourceRows === internshipRows) && (label === "工作描述" || label === "工作职责") ? formatNumberedText(row?.description)
             : key === "highlights" ? formatNumberedText(row?.[key])
             : row?.[key];
           const field = rowField(anchor, index, label, section, value);
+          if (key === "_type" && !field) continue;
+          if (key === "_type" && !isChoiceControl(field)) value = row?.type || row?.category;
+          if ((sourceRows === workRows || sourceRows === internshipRows) && (label === "工作描述" || label === "工作职责")) {
+            const highlightsField = rowField(anchor, index, "工作亮点", section);
+            if (!highlightsField || highlightsField === field) value = mergedWorkText(row);
+          }
+          if (label === "GPA" && field?.type === "number") {
+            value = String(value ?? "").trim().match(/^(\d+(?:\.\d+)?)\s*\/\s*\d+(?:\.\d+)?\s*%$/)?.[1] || value;
+          }
           if (field && label === "项目描述" && !rowField(anchor, index, "项目职责", section)) {
             const text = row?.description || row?.summary || "";
             value = [text, row?.responsibilities && !text.includes(row.responsibilities) ? row.responsibilities : ""].filter(Boolean).join("\n");
@@ -2101,18 +2289,31 @@
           const fieldName = `${section}[${index + 1}].${label}`;
           const targetLabel = field ? (fieldTitle(field) || labelText(field)) : "";
           const detail = { section, row: index + 1, company: row?.company || "", label, value: String(value || ""), datePartCount: /时间/.test(label) ? dateParts(value).length : 0, dateControlCount: /时间/.test(label) && field ? dateControls(field).length : 0, targetIndex: field ? fields().indexOf(field) : -1, targetLabel, targetRepeatIndex: field ? repeatIndex(field, targetLabel) : -1 };
+          if (anchor === "获奖项" && label === "获奖项" && !awardTypeConfirmed) {
+            deferredFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "choice-parent-not-confirmed" }); continue;
+          }
           if (anchor === "语言类型" && label !== "语言类型" && !languageTypeConfirmed) {
             skippedFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "language-type-not-confirmed" }); continue;
           }
           if (/结束时间/.test(label) && !startDateConfirmed) { structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "start-date-not-confirmed" }); continue; }
+          if (label === "GPA" && gpaFraction && !gpaScaleAgrees) {
+            structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "gpa-source-conflict" }); continue;
+          }
+          if (label === "GPA" && value && gpaType && !controlValue(field)) {
+            const typeField = rowField(anchor, index, "GPA类型", section, gpaType);
+            if (typeField && !valueMatches(controlValue(typeField), gpaType, "GPA类型")) {
+              structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "gpa-type-not-confirmed" }); continue;
+            }
+          }
           if (!value) {
             if (label === "语言类型") languageTypeConfirmed = false;
             if (/开始时间/.test(label)) startDateConfirmed = false;
-            if (/月薪|工作地点|获奖时间/.test(label)) diagnostics.structuredAttempts.push({ ...detail, reason: "profile-value-missing" });
+            if (/月薪|工作地点|获奖时间|成绩排名/.test(label)) diagnostics.structuredAttempts.push({ ...detail, reason: "profile-value-missing" });
             continue;
           }
           if (onlyEmpty && field && controlValue(field)) {
             detail.matchesSource = valueMatches(controlValue(field), value, label);
+            if (key === "_type") awardTypeConfirmed = detail.matchesSource;
             if (label === "语言类型") languageTypeConfirmed = valueMatches(controlValue(field), value, label);
             if (/开始时间/.test(label)) {
               startDateConfirmed = dateValueMatches(field, value);
@@ -2122,7 +2323,11 @@
           }
           if (!field) { if (label === "语言类型") languageTypeConfirmed = false; if (/开始时间/.test(label)) startDateConfirmed = false; structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "field-not-found" }); continue; }
           if (deferChoice(field)) { if (label === "语言类型") languageTypeConfirmed = false; if (/开始时间/.test(label)) startDateConfirmed = false; deferredFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "deferred-to-ai" }); continue; }
-          const applied = await applyValue(label, value, field);
+          const range = fullDateRange(field);
+          const rangeEnd = label === "开始时间" && range[0] === field ? row?.end : "";
+          if (rangeEnd) noteEmpty(range[1], rangeEnd, "结束时间");
+          const applied = await applyValue(label, value, field, { rangeEnd });
+          if (key === "_type") awardTypeConfirmed = applied;
           if (label === "语言类型") languageTypeConfirmed = applied;
           if (/开始时间/.test(label)) startDateConfirmed = applied && dateValueMatches(field, value);
           if (applied) {
@@ -2140,10 +2345,14 @@
     await closeVisibleDropdowns();
     diagnostics.deferredFields = deferredFields;
     diagnostics.expectedEmpty = expectedEmpty.size;
-    diagnostics.confirmedEmpty = [...expectedEmpty].filter(([key, { value, label }]) => {
+    const finalFields = new Map(formSchema().map((field) => [field.key, field]));
+    diagnostics.emptyTargets = [...expectedEmpty].map(([key, { value, label }]) => {
       const field = resolveField(key);
-      return field && (/日期|时间/.test(label) && dateParts(value).length >= 2 ? dateValueMatches(field, value) : valueMatches(controlValue(field), value, label));
-    }).length;
+      const descriptor = finalFields.get(key);
+      return { key, label, module: descriptor?.module || "", row: descriptor ? descriptor.repeatIndex + 1 : 0,
+        confirmed: !!field && (/日期|时间/.test(label) && dateParts(value).length >= 2 ? dateValueMatches(field, value) : valueMatches(controlValue(field), value, label)) };
+    });
+    diagnostics.confirmedEmpty = diagnostics.emptyTargets.filter((target) => target.confirmed).length;
     const result = { filled, missing: missing + structuredMissing, filledFields, missingFields, skippedFields, diagnostics };
     console.info("[resume-autofill] structured-fill", { filled, missing: result.missing, skipped: skippedFields.length });
     return result;
@@ -2158,7 +2367,7 @@
     panel.id = "resume-autofill-page-action";
     panel.dataset.resumeAutofillUi = "true";
     panel.dataset.contentProtocol = String(CONTENT_PROTOCOL);
-    panel.dataset.contentBuild = "98-choice-4";
+    panel.dataset.contentBuild = "100-datepicker-commit";
     panel.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:380px;padding:12px;background:white;color:#173e30;border:1px solid #b5d8c7;border-radius:10px;font:14px system-ui;box-shadow:0 4px 18px #0002";
     const oldButton = panel.querySelector("button");
     const button = oldButton ? oldButton.cloneNode(true) : document.createElement("button");
@@ -2180,7 +2389,7 @@
       status.textContent = "正在填充，请保持简历助手侧栏打开…";
       report.textContent = "";
       try {
-        const result = await runtime.sendMessage({ type: "RESUME_AUTOFILL_PAGE_FILL_V98" });
+        const result = await runtime.sendMessage({ type: "RESUME_AUTOFILL_PAGE_FILL_V100" });
         status.textContent = result?.status || "请打开简历助手侧栏后重试。";
         if (result?.diagnostics) report.textContent = JSON.stringify(result.diagnostics, null, 2);
       } catch { status.textContent = "请打开简历助手侧栏后重试。"; }
@@ -2215,11 +2424,14 @@
           }
           if (report) report.textContent = JSON.stringify({ phase: "structured", confirmed: result.filled, protected: result.skippedFields?.length || 0,
             expectedEmpty: result.diagnostics?.expectedEmpty, confirmedEmpty: result.diagnostics?.confirmedEmpty,
+            targets: result.diagnostics?.emptyTargets,
             emptyFields: formSchema().filter((field) => !field.currentValue).map(({ label, module, repeatIndex, type }) => ({ label, module, row: repeatIndex + 1, type })),
             diagnostics: (result.diagnostics?.structuredAttempts || []).map((item) => ({ label: item.label, section: item.section, row: item.row,
               reason: item.reason, datePartCount: item.datePartCount, dateControlCount: item.dateControlCount, interaction: item.choice?.failure,
               path: item.choice?.path, calendarFound: item.choice?.datePicker?.panelFound,
-              calendarPopupCount: item.choice?.datePicker?.popupCount, dateMatch: item.dateMatch, matchesSource: item.matchesSource })) }, null, 2);
+              calendarMode: item.choice?.datePicker?.mode, dayFound: item.choice?.datePicker?.dayFound,
+              calendarPopupCount: item.choice?.datePicker?.popupCount, calendarReopened: item.choice?.datePicker?.reopenedYearList,
+              dateMatch: item.dateMatch, matchesSource: item.matchesSource })) }, null, 2);
         }
         sendResponse(result);
       })

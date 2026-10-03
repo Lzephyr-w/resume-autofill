@@ -14,7 +14,7 @@
   const results = [];
   for (const name of cases) {
     output.textContent = [...results, `运行中：${name}`].join("\n");
-    frame.src = `mock-form.html?ui=${name}`;
+    frame.src = `mock-form.html?ui=${name}&build=100-datepicker-commit`;
     const deadline = Date.now() + 300000;
     let result = "";
     while (Date.now() < deadline) {
@@ -24,6 +24,7 @@
       if (/^(PASS|FAIL)/.test(result)) break;
     }
     results.push(/^(PASS|FAIL)/.test(result) ? result.split("\n").filter((line) => /^(PASS|FAIL|✗)/.test(line)).join(" | ") : `FAIL ${name} 超时`);
+    if (!result.startsWith("PASS")) { const detail = document.createElement("pre"); detail.dataset.case = name; detail.textContent = result || `${name} 超时`; output.after(detail); }
   }
   output.textContent = results.join("\n");
   output.className = results.every((result) => result.startsWith("PASS")) ? "pass" : "fail";

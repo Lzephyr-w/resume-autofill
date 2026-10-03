@@ -1,0 +1,113 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>表格日期范围回归</title>
+<style>body{font:16px system-ui;padding:20px}input{width:150px;height:28px}td,button{padding:8px}.generic-picker-dropdown{position:fixed;top:20px;left:20px;background:white;border:1px solid}</style>
+<section><h2>基本信息</h2><label>紧急联系人<input id="contact"></label></section>
+<section><h2>工作经历</h2><div id="rows"></div></section>
+<section><h2>项目经验</h2><div id="projectRows"><div class="generic-array-card"><label>项目名称<input></label></div></div><div class="generic-add" id="addProject">添加项目经验</div></section>
+<section><h2>语言能力</h2><label>语种<input value="英语"></label></section>
+<section><h2>IT技能</h2><label>技能类别<select><option>请选择</option></select></label><button id="addSkill">添加</button></section>
+<div><div><h3>基本信息</h3><div class="generic-form-item"><label>紧急联系人<input id="looseContact"></label></div></div><div><h3>实习经历</h3><button id="addIntern">添加</button><div id="internRows"></div></div></div>
+<pre id="result">运行中…</pre>
+<div class="generic-picker-dropdown generic-slide-up-leave" style="left:0;top:0"><button>1999年</button><table><tr><td>1</td></tr></table><div id="oldMonths"></div></div>
+<script>
+document.getElementById('oldMonths').innerHTML=Array.from({length:12},(_,i)=>`<span>${i+1}月</span>`).join('');
+const rows = document.getElementById('rows');
+rows.innerHTML = ['甲公司','乙公司'].map((company,i)=>`<div class="generic-array-card"><label>公司名称<input value="${company}"></label><div class="generic-form-item"><label>起止时间</label><div class="range-picker__test generic-picker-range"><div class="generic-picker-input"><input id="start${i}" placeholder="请选择开始时间" ${i?'value="2024-01-02"':''}></div><div class="generic-picker-input"><input id="end${i}" placeholder="请选择结束时间" readonly></div></div></div></div>`).join('');
+let active, popup, year=2026, month=10, wrong=0, additions=0;
+const events=[];
+document.getElementById('addSkill').onclick=()=>additions++;
+document.getElementById('addProject').onclick=()=>document.getElementById('projectRows').insertAdjacentHTML('beforeend','<div class="generic-array-card"><label>项目名称<input></label></div>');
+document.getElementById('addIntern').onclick=()=>document.getElementById('internRows').insertAdjacentHTML('beforeend','<div class="generic-array-card"><label>公司名称<input></label><label>职位名称<input></label><label>开始时间<input type="date"></label><label>结束时间<input type="date"></label></div>');
+document.addEventListener('focusin',e=>{if(e.target.matches('.generic-picker-input input')){active=e.target;events.push(`focus:${active.id}`);}});
+const render = () => {
+  popup.innerHTML = [0,1].map(i=>{
+    const view=new Date(year,month-1+i,1), y=view.getFullYear(), m=view.getMonth()+1;
+    const prefix=`${y}-${String(m).padStart(2,'0')}`;
+    return `<div style="display:inline-block"><button class="generic-picker-header-super-prev-btn" style="visibility:${i?'hidden':'visible'}">«</button><button class="generic-picker-header-prev-btn" style="visibility:${i?'hidden':'visible'}">‹</button><span class="generic-picker-year">${y}年</span><span class="generic-picker-month">${m}月</span><button class="generic-picker-header-next-btn" style="visibility:${i?'visible':'hidden'}">›</button><button class="generic-picker-header-super-next-btn" style="visibility:${i?'visible':'hidden'}">»</button><table><tr><td class="generic-picker-cell" title="${y-1}-${String(m).padStart(2,'0')}-02">2</td><td class="generic-picker-cell generic-picker-cell-disabled" title="${prefix}-02">2</td><td class="generic-picker-cell" title="${prefix}-02"><div>2</div></td></tr></table></div>`;
+  }).join('');
+};
+document.addEventListener('click',e=>{
+  if(e.target.matches('.generic-picker-input input')) {
+    active=e.target;
+    events.push(`open:${active.id}`);
+    if(!popup){popup=document.createElement('div');popup.className='generic-picker-dropdown';document.body.append(popup);}
+    render();
+  }
+  const button=e.target.closest('button');
+  if(button&&popup?.contains(button)) {
+    if(/super-prev/.test(button.className))year--;else if(/super-next/.test(button.className))year++;
+    else if(/prev-btn/.test(button.className))month--;else month++;
+    render();
+  }
+  const cell=e.target.closest('td');
+  if(cell&&popup?.contains(cell)) {
+    events.push(`day:${active.id}`);
+    if(/disabled/.test(cell.className)||cell.title.slice(0,4)!==cell.closest('div[style]').querySelector('.generic-picker-year').textContent.slice(0,4))wrong++;
+    if(!cell.querySelector('div')||!active.dataset.pressed){wrong++;return;}
+    active.value=cell.title;delete active.dataset.pressed;
+    const range=active.closest('.generic-picker-range');
+    if(active===range.querySelectorAll('input')[1]){range.dataset.committed='true';popup.remove();popup=null;}
+  }
+});
+document.addEventListener('mousedown',e=>{if(e.target.closest('.generic-picker-dropdown table td'))active.dataset.pressed='true';});
+document.body.addEventListener('mousedown',e=>{
+  if(e.target.closest('.generic-picker-range, .generic-picker-dropdown'))return;
+  document.querySelectorAll('.generic-picker-range:not([data-committed])').forEach(range=>{
+    const [start,end]=range.querySelectorAll('input');if(start.value&&!end.value&&start.id==='start0')start.value='';
+  });
+});
+globalThis.__RESUME_AUTOFILL_TEST__=true;
+</script>
+<script src="../content.js?v=100-datepicker-commit"></script>
+<script>
+(async()=>{
+  const api=globalThis.__resumeAutofillTest;
+  const module=api.formSchema().find(f=>f.id==='contact').module;
+  const report=await api.fill({work:[{company:'甲公司',start:'2023-09-02',end:'2025-08-02'},{company:'乙公司',start:'2024-01-02',end:'2026-06-02'}]},{onlyEmpty:true});
+  const closed=!popup;
+  const values=[...rows.querySelectorAll('.generic-picker-input input')].map(e=>e.value);
+  await api.fill({skills:[{name:'测试技能'}]},{onlyEmpty:true});
+  const looseModule=api.formSchema().find(f=>f.id==='looseContact').module;
+  const interns=await api.fill({internships:[{company:'实习甲',title:'实习生',start:'2024-01-02',end:'2024-03-02'},{company:'实习乙',title:'实习生',start:'2025-01-02',end:'2025-03-02'}]},{onlyEmpty:true});
+  const internConfirmed=interns.diagnostics.confirmedEmpty;
+  const projects=await api.fill({projects:[{name:'项目甲'},{name:'项目乙'},{name:'项目丙'}]},{onlyEmpty:true});
+  const projectConfirmed=projects.diagnostics.confirmedEmpty;
+  document.body.insertAdjacentHTML('beforeend','<label>毕业时间<input id="asideDate" role="combobox" readonly></label>');
+  const asideDate=document.getElementById('asideDate');
+  const stalePanel=document.createElement('div');stalePanel.className='generic-popper-wrap';stalePanel.style.cssText='position:fixed;left:750px;top:120px;background:white';
+  stalePanel.innerHTML='<span>2026年</span><div class="generic-aside-item">-12</div>'+Array.from({length:12},(_,i)=>`<div class="generic-month-item"><span>${i+1}月</span></div>`).join('');
+  stalePanel.onclick=()=>wrong++;
+  document.body.append(stalePanel);
+  const openAside=()=>{
+    if(document.querySelector('.generic-popper-wrap[data-current]'))return;
+    const panel=document.createElement('div');panel.className='generic-popper-wrap';panel.style.cssText='position:absolute;left:30px;top:30px;background:white';
+    panel.dataset.current='true';
+    let selectedYear=2026;
+    panel.innerHTML='<div class="generic-panel-title"><span>2026年</span></div><aside>'+Array.from({length:10},(_,i)=>`<div class="generic-aside-item">${2020+i}</div>`).join('')+'</aside><div>'+Array.from({length:12},(_,i)=>`<div class="generic-month-item"><span>${i+1}月</span></div>`).join('')+'</div>';
+    panel.onclick=e=>{const year=e.target.closest('.generic-aside-item'),month=e.target.closest('.generic-month-item');if(year){selectedYear=Number(year.textContent);panel.querySelector('.generic-panel-title span').textContent=selectedYear+'年';}if(month){asideDate.value=selectedYear+'-'+String(parseInt(month.textContent)).padStart(2,'0');panel.remove();}};
+    document.body.append(panel);
+  };
+  asideDate.onfocus=openAside;
+  asideDate.onclick=()=>{const opened=document.querySelector('.generic-popper-wrap[data-current]');if(opened)opened.remove();else openAside();};
+  const asideField=api.formSchema().find(f=>f.id==='asideDate');
+  const asideFill=await api.applyAssignments([{key:asideField.key,value:'2022-09',confidence:1}]);
+  const asideConfirmed=asideFill.filled===1&&asideDate.value==='2022-09';
+  stalePanel.remove();
+  document.body.insertAdjacentHTML('beforeend','<label>毕业时间<input id="badDate" role="combobox" readonly></label>');
+  const badDate=document.getElementById('badDate');
+  badDate.onclick=()=>{
+    document.querySelector('.bad-year-calendar')?.remove();
+    const panel=document.createElement('div');panel.className='bad-year-calendar';panel.style.cssText='position:fixed;left:30px;top:30px;background:white';
+    panel.innerHTML='<span class="generic-year-title">2026年</span>'+Array.from({length:25},(_,i)=>`<div class="generic-aside-item">${i-12}</div>`).join('')+Array.from({length:12},(_,i)=>`<div class="generic-month-item"><span>${i+1}月</span></div>`).join('');
+    panel.querySelector('.generic-year-title').onclick=()=>wrong++;
+    document.body.append(panel);
+  };
+  const badField=api.formSchema().find(f=>f.id==='badDate');
+  const badFill=await api.applyAssignments([{key:badField.key,value:'2022-09',confidence:1}]);
+  const badCurrentFill=await api.applyAssignments([{key:badField.key,value:'2026-09',confidence:1}]);
+  const badSkipped=[badFill,badCurrentFill].every(result=>result.filled===0&&result.diagnostics[0]?.choice?.failure==='year-option-not-visible')&&!badDate.value;
+  const ok=badSkipped&&asideConfirmed&&projectConfirmed===3&&document.querySelectorAll('#projectRows input').length===3&&module==='基本信息'&&looseModule==='基本信息'&&internConfirmed===8&&document.querySelectorAll('#internRows .generic-array-card').length===2&&closed&&wrong===0&&additions===0&&JSON.stringify(values)===JSON.stringify(['2023-09-02','2025-08-02','2024-01-02','2026-06-02'])&&report.diagnostics.expectedEmpty===3&&report.diagnostics.confirmedEmpty===3;
+  document.getElementById('result').textContent=`${ok?'PASS':'FAIL'} 表格日期候选、范围提交、已有开始日期保护、模块边界\n${JSON.stringify({module,looseModule,internConfirmed,closed,wrong,values,events,expected:report.diagnostics.expectedEmpty,confirmed:report.diagnostics.confirmedEmpty,attempts:report.diagnostics.structuredAttempts.filter(e=>/时间/.test(e.label)).map(e=>({label:e.label,row:e.row,index:e.targetIndex,reason:e.reason,placeholder:e.choice?.target?.placeholder,path:e.choice?.path,failure:e.choice?.failure}))})}`;
+})().catch(e=>document.getElementById('result').textContent=`FAIL ${e.stack}`);
+</script>
