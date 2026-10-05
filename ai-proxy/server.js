@@ -122,6 +122,7 @@ function mappingResults(result, fields) {
     if (matches.length !== 1) return { ...detail, reason: matches.length ? "ambiguous-mapping" : "ai-no-assignment" };
     const item = matches[0];
     if (!field.sources?.some((source) => source.path === item.profilePath)) return { ...detail, reason: "invalid-profile-path" };
+    if ((/拼音|pinyin|英文(?:姓|名)|(?:english|first|last|given|family)[\s_-]*name/i.test([field.label, field.autocomplete, field.id, field.name, field.ariaLabel, field.placeholder].join(" ")) || /^(?:姓|名|姓氏)$/.test(String(field.label || ""))) && !/^customFields\[/.test(item.profilePath)) return { ...detail, reason: "explicit-name-source-required" };
     if (!Number.isFinite(item.confidence) || item.confidence < 0.8 || item.confidence > 1) return { ...detail, reason: "low-confidence" };
     if (field.currentValue) return { ...detail, reason: "page-value-protected" };
     if (field.isChoice && !field.options?.includes(item.value)) return { ...detail, stage: "candidate", reason: field.options?.length ? "not-a-page-option" : "options-unavailable" };
@@ -161,6 +162,7 @@ async function match(fields) {
     "每条只返回给定 key 与该字段 sources 中的 profilePath，绝不生成 CSS、XPath、脚本或新来源。",
     "严格区分字段含义、module 和重复条目；联系方式、日期、分数、描述不能互换。无明确语义或有歧义时省略。",
     "普通文本字段只匹配来源路径，value 必须为空，客户端从本地档案取原值。",
+    "拼音、英文名和拆分姓/名只能使用明确的对应来源；不能从中文全名推断、翻译或拆分。derived 来源是客户端按字段语义生成的完整叙述或明确满分值。",
     "选择字段 isChoice=true 时，参考 sources 的本地值，value 必须完整原样来自该字段 options；候选为空或不匹配则省略。",
     "类型/类别字段允许把来源的具体职业或名称归入页面提供的上位类别；例如职业归入职能类别、奖项归入获奖类型。仅在归属明确时返回；具体名称字段不可用上位类别替代。",
     "名称字段可按同一实体的简称、别名或地域/赛道/等次附加信息匹配完整候选。结合 sourceLevel 判断，奖学金的级别与等次不能互换。",

@@ -16,8 +16,8 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
-# Unreferenced local test capture
-tests/component-stuck.png
+# Local tests, fixtures and regression captures
+/tests/
 
 # Local debugging notes; never commit incident records from a user's form session.
 .local-notes/

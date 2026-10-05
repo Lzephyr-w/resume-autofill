@@ -67,6 +67,7 @@
           <label>最高学历<select id="education"><option value="">请选择</option><option>高中及以下</option><option>大专</option><option>本科</option><option>硕士</option><option>博士</option></select></label>
           <label>受教育类型<select id="educationType"><option value="">请选择</option><option>全日制</option><option>非全日制</option><option>在职</option><option>网络教育</option><option>其他</option></select></label>
           <label>毕业院校<input id="university" type="text" placeholder="例如：清华大学"></label>
+          <label>学校所在城市<input id="educationLocation" type="text" placeholder="例如：北京市"></label>
           <label>学院<input id="college" type="text" placeholder="例如：计算机学院"></label>
           <label>专业<input id="major" type="text" placeholder="例如：计算机科学与技术"></label>
           <label>入学时间<input id="educationStart" type="text" placeholder="例如：2021-09"></label>
@@ -121,6 +122,7 @@
             <label>项目链接<input id="projectLink1" type="url" placeholder="例如：https://github.com/example/project"></label>
             <label class="wide">项目描述<textarea id="projectDesc1" placeholder="项目背景、目标等…"></textarea></label>
             <label class="wide">职责<textarea id="projectDuty1" placeholder="你负责的具体工作…"></textarea></label>
+            <label class="wide">项目成果<textarea id="projectOutcomes1" placeholder="项目已实现的成果；部分招聘网站必填"></textarea></label>
           </div>
         </div>
       </section>
@@ -216,6 +218,7 @@
     </section>
     <div id="status" role="status" aria-live="polite"></div>
   </main>
+  <script src="vendor/pinyin-pro-3.29.4.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
