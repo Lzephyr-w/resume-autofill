@@ -29,6 +29,18 @@ const trustedClick = async (tabId, x, y, plain = false) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "RESUME_AUTOFILL_REVIEW_FIELD" && sender.id === chrome.runtime.id && sender.tab?.id != null && sender.frameId === 0) {
+    if (!Number.isInteger(message.frameId) || message.frameId < 0 || typeof message.key !== "string" || message.key.length > 160) { sendResponse({ located: false }); return; }
+    (async () => {
+      const located = await chrome.tabs.sendMessage(sender.tab.id, { type: "LOCATE_FIELD_V100", key: message.key }, { frameId: message.frameId });
+      if (!located?.located) return { located: false };
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const [active] = await chrome.tabs.query({ active: true, windowId: sender.tab.windowId });
+      if (active?.id !== sender.tab.id) return { located: true };
+      return { located: true, image: await chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: "jpeg", quality: 70 }) };
+    })().then(sendResponse).catch(() => sendResponse({ located: false }));
+    return true;
+  }
   if (message?.type === "RESUME_AUTOFILL_PAGE_FILL_V100" && sender.id === chrome.runtime.id && sender.tab?.id != null && sender.frameId === 0) {
     (async () => {
       await openTabPanel(sender.tab.id);

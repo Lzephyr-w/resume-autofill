@@ -2718,8 +2718,17 @@
   }
 
   const runtime = globalThis.chrome?.runtime;
+  const locateField = (key) => {
+    const target = resolveField(key);
+    if (!target) return { located: false };
+    target.scrollIntoView({ block: "center", inline: "nearest" });
+    const original = target.style.outline;
+    target.style.outline = "3px solid #f59e0b";
+    setTimeout(() => { if (target.isConnected && target.style.outline === "3px solid rgb(245, 158, 11)") target.style.outline = original; }, 3000);
+    return { located: true };
+  };
   function showPageAction(result) {
-    if (window.top !== window || fields().length < 4 || !runtime?.sendMessage) return { shown: false };
+    if (window.top !== window || !result && fields().length < 4 || !runtime?.sendMessage) return { shown: false };
     const existing = document.getElementById("resume-autofill-page-action");
     if (existing?.querySelector("button")?.disabled) return { shown: true, protocol: CONTENT_PROTOCOL };
     const panel = existing || document.createElement("aside");
@@ -2727,25 +2736,78 @@
     panel.dataset.resumeAutofillUi = "true";
     panel.dataset.contentProtocol = String(CONTENT_PROTOCOL);
     panel.dataset.contentBuild = "100-scholarship-type-source";
-    panel.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:380px;padding:12px;background:white;color:#173e30;border:1px solid #b5d8c7;border-radius:10px;font:14px system-ui;box-shadow:0 4px 18px #0002";
+    panel.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 32px);box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;gap:8px;padding:12px;background:white;color:#173e30;border:1px solid #b5d8c7;border-radius:10px;font:14px system-ui;box-shadow:0 4px 18px #0002";
+    if (!result && existing?.querySelector("details[data-section=diagnostics]")) return { shown: true, protocol: CONTENT_PROTOCOL };
     const oldButton = panel.querySelector("button");
     const button = oldButton ? oldButton.cloneNode(true) : document.createElement("button");
     oldButton?.replaceWith(button);
     button.type = "button";
     button.textContent = "简历助手：填充当前页面";
+    button.style.cssText = "display:block;width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #b5d8c7;border-radius:7px;background:#f5fff8;color:#173e30;font:inherit;text-align:left;cursor:pointer";
     const status = panel.querySelector('[role="status"]') || document.createElement("p");
     status.setAttribute("role", "status");
-    const details = panel.querySelector("details") || document.createElement("details");
+    status.style.cssText = "margin:0;max-height:48px;overflow:auto;color:#526b5d;font-size:12px;line-height:1.45";
+    const detailStyle = "max-height:calc((100vh - 112px) / 2);min-height:0;overflow:auto;overscroll-behavior:contain;margin:0;border-top:1px solid #e1eee6;padding-top:4px";
+    const summaryStyle = "position:sticky;top:0;z-index:1;padding:4px 0;background:white;color:#173e30;font-weight:600;cursor:pointer";
+    const details = panel.querySelector("details[data-section=diagnostics]") || panel.querySelector("details") || document.createElement("details");
+    const legacyReview = details.querySelector("[data-review]");
+    const reviewDetails = panel.querySelector("details[data-section=review]") || document.createElement("details");
+    details.dataset.section = "diagnostics";
+    reviewDetails.dataset.section = "review";
+    details.style.cssText = detailStyle;
+    reviewDetails.style.cssText = detailStyle;
     const summary = details.querySelector("summary") || document.createElement("summary");
     summary.textContent = "填充诊断";
+    summary.style.cssText = summaryStyle;
+    const reviewSummary = reviewDetails.querySelector("summary") || document.createElement("summary");
+    reviewSummary.textContent = "截图核对";
+    reviewSummary.style.cssText = summaryStyle;
     const report = details.querySelector("pre") || document.createElement("pre");
-    report.style.cssText = "max-height:220px;overflow:auto;white-space:pre-wrap;font-size:12px";
+    report.style.cssText = "margin:8px 0;white-space:pre-wrap;font-size:12px;line-height:1.45";
     details.append(summary, report);
     if (result) {
       status.textContent = result.status || "";
       report.textContent = JSON.stringify(result.diagnostics || {}, null, 2);
     }
-    panel.append(button, status, details);
+    const review = reviewDetails.querySelector('[data-review]') || legacyReview || document.createElement("div");
+    review.dataset.review = "true";
+    const uncertain = [...(result?.diagnostics?.reviewFields || []), ...(result?.diagnostics?.remainingFields || [])];
+    const reviewable = uncertain.filter(field => field.key && field.reason !== "profile-value-missing").slice(0, 10);
+    if (result) review.replaceChildren();
+    reviewDetails.hidden = result ? !reviewable.length : !review.childNodes.length;
+    legacyReview?.remove();
+    const reviewed = new Set();
+    for (const field of reviewable) {
+      if (reviewed.has(field.key)) continue;
+      reviewed.add(field.key);
+      const inspect = document.createElement("button");
+      inspect.type = "button";
+      inspect.textContent = `截图核对：${field.label || "未确认字段"}（仅本地）`;
+      inspect.style.cssText = "display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:6px 8px;border:1px solid #b5d8c7;border-radius:6px;background:#f8fbf9;color:#173e30;font:12px system-ui;text-align:left;cursor:pointer";
+      inspect.addEventListener("click", async (event) => {
+        if (!event.isTrusted || inspect.disabled) return;
+        inspect.disabled = true;
+        try {
+          const response = await runtime.sendMessage({ type: "RESUME_AUTOFILL_REVIEW_FIELD", key: field.fieldKey || field.key, frameId: field.frameId ?? result?.diagnostics?.frameId ?? 0 });
+          if (response?.image) {
+            const preview = document.createElement("img");
+            preview.src = response.image;
+            preview.alt = "当前页面本地截图，不会发送给模型";
+            preview.style.cssText = "display:block;max-width:100%;max-height:240px;object-fit:contain";
+            const host = document.createElement("div");
+            host.dataset.localPreview = "true";
+            host.style.cssText = "display:block;max-height:240px;overflow:auto;margin-top:8px;border:1px solid #dbe7df;border-radius:6px;background:#f8fbf9";
+            host.attachShadow({ mode: "closed" }).append(preview);
+            review.querySelector("[data-local-preview]")?.remove();
+            review.append(host);
+          } else inspect.textContent = response?.located ? "请切回该网页再截图" : "字段已变化，请重新填充或人工核对";
+        } catch { inspect.textContent = "截图不可用，请人工核对"; }
+        finally { inspect.disabled = false; }
+      });
+      review.append(inspect);
+    }
+    reviewDetails.append(reviewSummary, review);
+    panel.append(button, status, details, reviewDetails);
     button.addEventListener("click", async (event) => {
       if (!event.isTrusted || button.disabled) return;
       button.disabled = true;
@@ -2769,6 +2831,7 @@
       PREPARE_PROFILE: () => prepareProfile(message.profile, message.corrections),
       FILL_PROFILE: () => fill(message.profile, message.options),
       APPLY_ASSIGNMENTS: () => applyAssignments(message.assignments),
+      LOCATE_FIELD: () => locateField(message.key),
       SHOW_PAGE_ACTION: () => showPageAction(message.result)
     };
     const type = String(message?.type || "");
@@ -2779,11 +2842,11 @@
     Promise.resolve().then(task)
       .then((result) => {
         if (type === `FILL_PROFILE${suffix}`) {
-          const details = document.querySelector("#resume-autofill-page-action details");
+          const details = document.querySelector("#resume-autofill-page-action details[data-section=diagnostics]") || document.querySelector("#resume-autofill-page-action details");
           let report = details?.querySelector("pre[data-structured]");
           if (details && !report) {
             report = document.createElement("pre"); report.dataset.structured = "true";
-            report.style.cssText = "max-height:220px;overflow:auto;white-space:pre-wrap;font-size:12px";
+            report.style.cssText = "margin:8px 0;white-space:pre-wrap;font-size:12px;line-height:1.45";
             details.append(report);
           }
           if (report) report.textContent = JSON.stringify({ phase: "structured", confirmed: result.filled, protected: result.skippedFields?.length || 0,

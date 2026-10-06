@@ -1208,7 +1208,9 @@ async function showPageAction(tabId) {
   const tab = await chrome.tabs.get(tabId);
   if (!isWebPage(tab?.url)) return;
   await injectCurrentContent(tabId);
-  await sendToFrame(tabId, 0, { type: "SHOW_PAGE_ACTION" });
+  const state = await readTabState(tabId);
+  const result = state.lastAiDiagnostics ? { status: state.status || "", diagnostics: state.lastAiDiagnostics } : undefined;
+  await sendToFrame(tabId, 0, result ? { type: "SHOW_PAGE_ACTION", result } : { type: "SHOW_PAGE_ACTION" });
 }
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   if (!fillInProgress) loadTabState(tabId).catch(() => {});
