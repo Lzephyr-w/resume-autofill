@@ -385,11 +385,16 @@ function parseText(text) {
 }
 
 function show(profile) { $("preview").textContent = JSON.stringify(profile, null, 2); }
-function message(value, error = false, target = "status", variant = "") {
+function renderStatus(target, data = {}) {
+  data ||= {};
   const status = $(target) || $("status");
-  status.textContent = value;
-  status.className = variant || (error ? "error" : "success");
-  status.style.color = error ? "#b42318" : "#15803d";
+  status.textContent = data.value || "";
+  status.className = data.variant || (data.value ? data.error ? "error" : "success" : "");
+  status.style.color = data.error ? "#b42318" : "#15803d";
+  return status;
+}
+function message(value, error = false, target = "status", variant = "") {
+  const status = renderStatus(target, { value, error, variant });
   if (status.id !== "status") { $("status").textContent = ""; $("status").className = ""; }
   chrome.storage.local.set({ lastStatus: value, lastStatusError: error, lastStatusTarget: status.id, lastStatusVariant: status.className });
 }
@@ -1079,9 +1084,28 @@ function sendToFrame(tabId, frameId, message) {
   return chrome.tabs.sendMessage(tabId, contentMessage(message), { frameId }).then(responseOrThrow);
 }
 
-let pageActionVisible = true;
+const TAB_STATE_PREFIX = "resume-autofill.tab.";
+const TAB_STATE_FIELDS = ["status", "diagnostics", "pageActionVisible", "toolsStatus"];
+const tabStateKey = (tabId, field) => `${TAB_STATE_PREFIX}${tabId}.${field}`;
+const fillsInProgress = new Map();
+const togglingTabs = new Set();
+const closedTabs = new Set();
+let currentTabId = null;
+let currentWindowId = null;
+let tabViewRevision = 0;
+async function readTabState(tabId) {
+  const stored = await chrome.storage.session.get(TAB_STATE_FIELDS.map(field => tabStateKey(tabId, field)));
+  return Object.fromEntries(TAB_STATE_FIELDS.map(field => [field, stored[tabStateKey(tabId, field)]]));
+}
+async function writeTabState(tabId, patch) {
+  if (!Number.isInteger(tabId) || closedTabs.has(tabId)) return;
+  await chrome.storage.session.set(Object.fromEntries(Object.entries(patch).map(([field, value]) => [tabStateKey(tabId, field), value])));
+}
+function setFillStatus(tabId, value, error = false, running = false) {
+  return writeTabState(tabId, { status: { value, error, running } });
+}
 function updatePageActionToggle(visible) {
-  pageActionVisible = visible !== false;
+  const pageActionVisible = visible !== false;
   $("toggle-page-action").textContent = pageActionVisible ? "隐藏页面浮窗" : "显示页面浮窗";
   $("toggle-page-action").setAttribute("aria-pressed", String(pageActionVisible));
 }
@@ -1116,6 +1140,7 @@ function renderPageReview(report) {
         const response = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_REVIEW_FIELD", tabId: report.tabId,
           key: field.fieldKey || field.key, frameId: field.frameId ?? report.frameId ?? 0,
           locator: { label: field.label, module: field.module || "", row: field.row } });
+        if (currentTabId !== report.tabId || !button.isConnected) return;
         if (response?.image) {
           preview.src = response.image;
           preview.hidden = false;
@@ -1128,38 +1153,50 @@ function renderPageReview(report) {
   }
   if (fields.length) $("page-review").open = true;
 }
-async function refreshPageReview(tabId) {
-  const tab = Number.isInteger(tabId) ? await chrome.tabs.get(tabId) : await activeTab();
-  const { lastAiDiagnostics, pageActionVisible: visible } = await chrome.storage.local.get(["lastAiDiagnostics", "pageActionVisible"]);
-  updatePageActionToggle(visible);
-  renderPageReview(isWebPage(tab?.url) && lastAiDiagnostics?.tabId === tab.id ? lastAiDiagnostics : null);
-  return tab;
+function renderTabState(tabId, state = {}) {
+  renderStatus("ai-status", state.status);
+  renderStatus("page-tools-status", state.toolsStatus);
+  updatePageActionToggle(state.pageActionVisible);
+  renderPageReview(state.diagnostics || null);
+  $("ai").disabled = fillsInProgress.has(tabId);
+  $("toggle-page-action").disabled = togglingTabs.has(tabId);
+}
+async function refreshPageReview(tabId = currentTabId) {
+  const revision = ++tabViewRevision;
+  if (!Number.isInteger(tabId)) return null;
+  if (currentTabId !== tabId) { currentTabId = tabId; renderTabState(tabId); }
+  const tab = await chrome.tabs.get(tabId);
+  const state = await readTabState(tabId);
+  if (revision !== tabViewRevision || currentTabId !== tab.id) return null;
+  if (state.status?.running && !fillsInProgress.has(tabId)) state.status = { value: "上次填充已中断，请重新填充。", error: true };
+  renderTabState(tabId, state);
+  return { tab, state };
 }
 $("toggle-page-action").addEventListener("click", async () => {
   const button = $("toggle-page-action");
-  if (button.disabled) return;
+  const tabId = currentTabId;
+  if (button.disabled || !Number.isInteger(tabId)) return;
+  togglingTabs.add(tabId);
   button.disabled = true;
   try {
     await popupReady;
-    const tab = await activeTab();
+    const tab = await chrome.tabs.get(tabId);
     if (!isWebPage(tab?.url)) throw new Error("请先打开要填充的网页表单。");
-    const visible = !pageActionVisible;
+    const state = await readTabState(tabId);
+    const visible = state.pageActionVisible === false;
     await sendToFrame(tab.id, 0, { type: "SHOW_PAGE_ACTION", visible });
-    await chrome.storage.local.set({ pageActionVisible: visible });
-    updatePageActionToggle(visible);
-    $("page-tools-status").textContent = "";
-  } catch (error) { message(error.message || "页面浮窗切换失败，请刷新页面后重试。", true, "page-tools-status"); }
-  finally { button.disabled = false; }
+    await writeTabState(tabId, { pageActionVisible: visible, toolsStatus: null });
+  } catch (error) { await writeTabState(tabId, { toolsStatus: { value: error.message || "页面浮窗切换失败，请刷新页面后重试。", error: true } }); }
+  finally { togglingTabs.delete(tabId); if (currentTabId === tabId) button.disabled = false; }
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.lastAiDiagnostics) refreshPageReview().catch(() => {});
+  if (area === "session" && Number.isInteger(currentTabId) && TAB_STATE_FIELDS.some(field => tabStateKey(currentTabId, field) in changes)) refreshPageReview(currentTabId).catch(() => {});
 });
 
 async function load() {
-  const { profile, lastStatus, lastStatusError, lastStatusTarget, lastStatusVariant, pageActionVisible: visible } = await chrome.storage.local.get(["profile", "lastStatus", "lastStatusError", "lastStatusTarget", "lastStatusVariant", "pageActionVisible"]);
-  updatePageActionToggle(visible);
+  const { profile, lastStatus, lastStatusError, lastStatusTarget, lastStatusVariant } = await chrome.storage.local.get(["profile", "lastStatus", "lastStatusError", "lastStatusTarget", "lastStatusVariant"]);
   if (profile) show(profile);
-  if (lastStatus) {
+  if (lastStatus && !["ai-status", "page-tools-status"].includes(lastStatusTarget)) {
     const status = $(lastStatusTarget) || $("status");
     status.textContent = lastStatus;
     status.className = lastStatusVariant || (lastStatusError ? "error" : "success");
@@ -1185,12 +1222,12 @@ $("connect").addEventListener("click", async () => {
 
 async function fillPage(tabId) {
   const tab = Number.isInteger(tabId) ? await chrome.tabs.get(tabId) : await activeTab();
-  if (!isWebPage(tab?.url)) return message("请先打开要填充的网页表单。", true, "ai-status");
+  if (!isWebPage(tab?.url)) return setFillStatus(tab?.id, "请先打开要填充的网页表单。", true);
   const formData = collectManualForm();
-  if (!hasManualData(formData)) return message("请先填写手动表单。", true, "ai-status");
+  if (!hasManualData(formData)) return setFillStatus(tab.id, "请先填写手动表单。", true);
   try {
-    await chrome.storage.local.remove("lastAiDiagnostics");
-    message("正在读取表单字段并请求 AI 匹配…", false, "ai-status");
+    await writeTabState(tab.id, { diagnostics: null });
+    await setFillStatus(tab.id, "正在读取表单字段并请求 AI 匹配…", false, true);
     let profile = await saveManualProfile(false);
     await injectCurrentContent(tab.id);
     const target = await formFrame(tab.id);
@@ -1450,44 +1487,64 @@ async function fillPage(tabId) {
       candidateFilled, aiFilled, protected: plan.filter(field => field.protected).length, remaining: remaining.length,
       rows: { requested: rowCounts, present: actualRows }, plan,
       remainingFields: remaining.map(field => ({ key: field.key, label: field.label, module: field.module, row: field.repeatIndex, reason: !profileSources(field, profile).length && !hasProfileContext(field, profile) ? "profile-value-missing" : [...diagnostics].reverse().find(item => item.key === field.key)?.reason || "not-confirmed" })), diagnostics };
-    await chrome.storage.local.set({ lastAiDiagnostics });
     const failures = diagnostics.filter((item) => !["filled", "accepted", "page-value-protected", "deferred-to-ai"].includes(item.reason));
     const failureText = [...new Set(failures.map((item) => `${item.stage}:${item.reason}`))].slice(0, 6).join("、");
-    message(`结构化确认 ${repaired.filled} 项，候选确认 ${candidateFilled} 项，AI 确认 ${aiFilled} 项，保留原值 ${plan.filter(field => field.protected).length} 项；发现 ${after.fields?.length || 0} 个字段，剩余 ${remaining.length} 个空字段${failureText ? `；诊断：${failureText}` : ""}。请检查后自行提交。`, false, "ai-status");
-    const { pageActionVisible: visible } = await chrome.storage.local.get("pageActionVisible");
-    await sendToFrame(tab.id, 0, { type: "SHOW_PAGE_ACTION", visible: visible !== false, result: { status: $("ai-status").textContent, diagnostics: lastAiDiagnostics } }).catch(() => {});
+    const status = `结构化确认 ${repaired.filled} 项，候选确认 ${candidateFilled} 项，AI 确认 ${aiFilled} 项，保留原值 ${plan.filter(field => field.protected).length} 项；发现 ${after.fields?.length || 0} 个字段，剩余 ${remaining.length} 个空字段${failureText ? `；诊断：${failureText}` : ""}。请检查后自行提交。`;
+    await writeTabState(tab.id, { diagnostics: lastAiDiagnostics, status: { value: status, error: false, running: false } });
+    const { pageActionVisible: visible } = await readTabState(tab.id);
+    await sendToFrame(tab.id, 0, { type: "SHOW_PAGE_ACTION", visible: visible !== false, result: { status, diagnostics: lastAiDiagnostics } }).catch(() => {});
   } catch (error) {
     const detail = String(error.message || error);
-    if (detail.includes("Failed to fetch")) { $("ai-status").textContent = ""; $("ai-status").className = ""; message("配置已保存，但本地 Node 代理未启动。请先运行 README 中的 node 命令。", false, "connect-status", "hint"); }
-    else message(detail.includes("Receiving end does not exist") ? "插件脚本未注入当前页面，请重新加载插件后重试。" : detail, true, "ai-status");
+    await setFillStatus(tab.id, detail.includes("Failed to fetch") ? "本地 Node 代理未启动，请先运行 README 中的 node 命令。"
+      : detail.includes("Receiving end does not exist") ? "插件脚本未注入当前页面，请重新加载插件后重试。" : detail, true);
   }
 }
-let fillInProgress = false;
-async function fillCurrentPage(tabId) {
-  if (fillInProgress) return;
-  fillInProgress = true;
-  $("ai").disabled = true;
-  try { await popupReady; await fillPage(tabId); }
-  finally { fillInProgress = false; $("ai").disabled = false; }
+async function fillCurrentPage(tabId = currentTabId) {
+  const target = Number.isInteger(tabId) ? chrome.tabs.get(tabId) : activeTab();
+  await popupReady;
+  const tab = await target;
+  if (!Number.isInteger(tab?.id)) return { status: "请先打开要填充的网页表单。" };
+  if (fillsInProgress.has(tab.id)) return { status: "当前标签页正在填充，请等待完成。" };
+  const job = fillPage(tab.id);
+  fillsInProgress.set(tab.id, job);
+  if (currentTabId === tab.id) $("ai").disabled = true;
+  try {
+    await job;
+    const state = await readTabState(tab.id);
+    return { status: state.status?.value || "", diagnostics: state.diagnostics };
+  } catch (error) {
+    const status = String(error.message || error);
+    await setFillStatus(tab.id, status, true).catch(() => { if (currentTabId === tab.id) renderStatus("ai-status", { value: status, error: true }); });
+    return { status };
+  } finally { fillsInProgress.delete(tab.id); if (currentTabId === tab.id) $("ai").disabled = false; }
 }
 $("ai").addEventListener("click", () => fillCurrentPage());
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.type !== "RESUME_AUTOFILL_PAGE_RUN_V100" || sender.id !== chrome.runtime.id || sender.tab || !Number.isInteger(request.tabId)) return false;
-  if (fillInProgress) { sendResponse({ status: "已有填充正在进行，请等待完成。" }); return false; }
-  fillCurrentPage(request.tabId).then(async () => {
-    const { lastAiDiagnostics } = await chrome.storage.local.get("lastAiDiagnostics");
-    sendResponse({ status: $("ai-status").textContent, diagnostics: lastAiDiagnostics });
+  if (currentWindowId == null || request.windowId !== currentWindowId) return false;
+  chrome.tabs.get(request.tabId).then(tab => {
+    if (tab.windowId !== currentWindowId) { sendResponse({ status: "标签页已移到其他窗口，请在对应窗口重新填充。" }); return; }
+    return fillCurrentPage(tab.id).then(sendResponse);
   }).catch(() => sendResponse({ status: "填充失败，请查看简历助手侧栏。" }));
   return true;
 });
 async function showPageAction(tabId) {
-  const tab = await refreshPageReview(tabId);
-  if (fillInProgress) return;
+  const refreshed = await refreshPageReview(tabId);
+  if (!refreshed) return;
+  const { tab, state } = refreshed;
+  if (fillsInProgress.has(tab.id)) return;
   if (!isWebPage(tab?.url)) return;
   await injectCurrentContent(tabId);
-  await sendToFrame(tabId, 0, { type: "SHOW_PAGE_ACTION", visible: pageActionVisible });
+  await sendToFrame(tabId, 0, { type: "SHOW_PAGE_ACTION", visible: state.pageActionVisible !== false,
+    result: state.status ? { status: state.status.value, diagnostics: state.diagnostics || {} } : undefined });
 }
-chrome.tabs.onActivated.addListener(({ tabId }) => showPageAction(tabId).catch(() => {}));
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  if (windowId === currentWindowId) showPageAction(tabId).catch(() => {});
+});
+chrome.tabs.onRemoved.addListener(tabId => {
+  closedTabs.add(tabId);
+  if (currentTabId === tabId) { currentTabId = null; tabViewRevision++; renderTabState(null); }
+});
 
 const MANUAL_STORAGE_KEY = "applicationFormData";
 const MANUAL_SINGLE_FIELD_IDS = [
@@ -1756,4 +1813,4 @@ console.assert(completeCoverage.education[0].start === "2023-09-01" && completeC
 console.assert(completeCoverage.internships.length === 2 && completeCoverage.projects.length === 1 && completeCoverage.awards[0].date === "2025-04-01");
 setupRepeatableForms();
 const popupReady = Promise.all([load(), loadManualForm()]);
-popupReady.then(async () => { const tab = await activeTab(); if (tab?.id != null) await showPageAction(tab.id); }).catch(() => {});
+popupReady.then(async () => { const tab = await activeTab(); currentWindowId = tab?.windowId; if (tab?.id != null) await showPageAction(tab.id); }).catch(() => {});

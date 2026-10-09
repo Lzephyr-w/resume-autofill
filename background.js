@@ -2,6 +2,12 @@ chrome.action.onClicked.addListener(async (tab) => {
   if (tab.id != null) await chrome.sidePanel.open({ tabId: tab.id });
 });
 
+chrome.tabs.onRemoved.addListener(tabId => {
+  chrome.storage.session.get(null).then(stored => chrome.storage.session.remove(
+    Object.keys(stored).filter(key => key.startsWith(`resume-autofill.tab.${tabId}.`))
+  )).catch(() => {});
+});
+
 const trustedClick = async (tabId, x, y, plain = false) => {
   const debuggee = { tabId };
   let attached = false;
@@ -48,7 +54,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Opening a side panel is asynchronous; wait only for its message listener.
       for (let attempt = 0; attempt < 15; attempt++) {
         try {
-          const result = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_PAGE_RUN_V100", tabId: sender.tab.id });
+          const result = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_PAGE_RUN_V100", tabId: sender.tab.id, windowId: sender.tab.windowId });
           if (result) return result;
         } catch {}
         await new Promise((resolve) => setTimeout(resolve, 200));
