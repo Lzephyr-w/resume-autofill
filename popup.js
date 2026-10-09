@@ -1079,8 +1079,85 @@ function sendToFrame(tabId, frameId, message) {
   return chrome.tabs.sendMessage(tabId, contentMessage(message), { frameId }).then(responseOrThrow);
 }
 
+let pageActionVisible = true;
+function updatePageActionToggle(visible) {
+  pageActionVisible = visible !== false;
+  $("toggle-page-action").textContent = pageActionVisible ? "隐藏页面浮窗" : "显示页面浮窗";
+  $("toggle-page-action").setAttribute("aria-pressed", String(pageActionVisible));
+}
+function renderPageReview(report) {
+  const list = $("review-fields");
+  const preview = $("review-preview");
+  list.replaceChildren();
+  preview.hidden = true;
+  preview.removeAttribute("src");
+  const seen = new Set();
+  const fields = (report?.remainingFields || []).filter(field => {
+    if (!field?.key || !field.label) return false;
+    const key = `${field.frameId ?? report.frameId ?? 0}:${field.key}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  $("review-count").textContent = fields.length ? `${fields.length} 项` : "";
+  $("review-hint").textContent = !report ? "填充后将在这里显示仍未填写的字段，点击可定位并截图。"
+    : fields.length ? "点击字段可跳转定位并截图，截图仅在本地展示。" : "当前没有未填写的字段。";
+  for (const field of fields) {
+    const button = document.createElement("button");
+    const caption = `截图核对：${field.label}（仅本地）`;
+    button.type = "button";
+    button.textContent = caption;
+    button.title = [field.module, Number.isInteger(field.row) ? `第 ${field.row + 1} 条` : ""].filter(Boolean).join(" · ");
+    button.addEventListener("click", async event => {
+      if (!event.isTrusted || button.disabled) return;
+      button.disabled = true;
+      preview.hidden = true;
+      try {
+        const response = await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_REVIEW_FIELD", tabId: report.tabId,
+          key: field.fieldKey || field.key, frameId: field.frameId ?? report.frameId ?? 0,
+          locator: { label: field.label, module: field.module || "", row: field.row } });
+        if (response?.image) {
+          preview.src = response.image;
+          preview.hidden = false;
+          button.textContent = caption;
+        } else button.textContent = response?.located ? `${field.label}：请切回填充页面再截图` : `${field.label}字段已变化，请重新填充或人工核对`;
+      } catch { button.textContent = `${field.label}截图不可用，请人工核对`; }
+      finally { button.disabled = false; }
+    });
+    list.append(button);
+  }
+  if (fields.length) $("page-review").open = true;
+}
+async function refreshPageReview(tabId) {
+  const tab = Number.isInteger(tabId) ? await chrome.tabs.get(tabId) : await activeTab();
+  const { lastAiDiagnostics, pageActionVisible: visible } = await chrome.storage.local.get(["lastAiDiagnostics", "pageActionVisible"]);
+  updatePageActionToggle(visible);
+  renderPageReview(isWebPage(tab?.url) && lastAiDiagnostics?.tabId === tab.id ? lastAiDiagnostics : null);
+  return tab;
+}
+$("toggle-page-action").addEventListener("click", async () => {
+  const button = $("toggle-page-action");
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    await popupReady;
+    const tab = await activeTab();
+    if (!isWebPage(tab?.url)) throw new Error("请先打开要填充的网页表单。");
+    const visible = !pageActionVisible;
+    await sendToFrame(tab.id, 0, { type: "SHOW_PAGE_ACTION", visible });
+    await chrome.storage.local.set({ pageActionVisible: visible });
+    updatePageActionToggle(visible);
+    $("page-tools-status").textContent = "";
+  } catch (error) { message(error.message || "页面浮窗切换失败，请刷新页面后重试。", true, "page-tools-status"); }
+  finally { button.disabled = false; }
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.lastAiDiagnostics) refreshPageReview().catch(() => {});
+});
+
 async function load() {
-  const { profile, lastStatus, lastStatusError, lastStatusTarget, lastStatusVariant } = await chrome.storage.local.get(["profile", "lastStatus", "lastStatusError", "lastStatusTarget", "lastStatusVariant"]);
+  const { profile, lastStatus, lastStatusError, lastStatusTarget, lastStatusVariant, pageActionVisible: visible } = await chrome.storage.local.get(["profile", "lastStatus", "lastStatusError", "lastStatusTarget", "lastStatusVariant", "pageActionVisible"]);
+  updatePageActionToggle(visible);
   if (profile) show(profile);
   if (lastStatus) {
     const status = $(lastStatusTarget) || $("status");
@@ -1369,7 +1446,7 @@ async function fillPage(tabId) {
       datePicker: item.choice?.datePicker ? { currentYear: item.choice.datePicker.currentYear, targetYear: item.choice.datePicker.targetYear, yearMethod: item.choice.datePicker.yearMethod, monthCount: item.choice.datePicker.monthCount, rangeStartPending: !!item.choice.rangeStartPending } : undefined,
       yearNavigation: item.choice?.datePicker?.yearClicks?.map(({ trusted, fallback, trustedError }) => ({ trusted, fallback, trustedError })) });
     const diagnostics = [...allDiagnostics.structured, ...(actualRows.diagnostics || []), ...aiDiagnostics.flatMap((pass) => [...pass.model, ...pass.apply])].map(safeDiagnostic);
-    const lastAiDiagnostics = { protocol: 100, version: "0.9.103", build: "100-virtual-city-committed-input", frameId: target.frameId, discovered: after.fields?.length || 0, structuredFilled: repaired.filled,
+    const lastAiDiagnostics = { protocol: 100, version: "0.9.103", build: "100-virtual-city-committed-input", tabId: tab.id, frameId: target.frameId, discovered: after.fields?.length || 0, structuredFilled: repaired.filled,
       candidateFilled, aiFilled, protected: plan.filter(field => field.protected).length, remaining: remaining.length,
       rows: { requested: rowCounts, present: actualRows }, plan,
       remainingFields: remaining.map(field => ({ key: field.key, label: field.label, module: field.module, row: field.repeatIndex, reason: !profileSources(field, profile).length && !hasProfileContext(field, profile) ? "profile-value-missing" : [...diagnostics].reverse().find(item => item.key === field.key)?.reason || "not-confirmed" })), diagnostics };
@@ -1377,7 +1454,8 @@ async function fillPage(tabId) {
     const failures = diagnostics.filter((item) => !["filled", "accepted", "page-value-protected", "deferred-to-ai"].includes(item.reason));
     const failureText = [...new Set(failures.map((item) => `${item.stage}:${item.reason}`))].slice(0, 6).join("、");
     message(`结构化确认 ${repaired.filled} 项，候选确认 ${candidateFilled} 项，AI 确认 ${aiFilled} 项，保留原值 ${plan.filter(field => field.protected).length} 项；发现 ${after.fields?.length || 0} 个字段，剩余 ${remaining.length} 个空字段${failureText ? `；诊断：${failureText}` : ""}。请检查后自行提交。`, false, "ai-status");
-    await sendToFrame(tab.id, 0, { type: "SHOW_PAGE_ACTION", result: { status: $("ai-status").textContent, diagnostics: lastAiDiagnostics } }).catch(() => {});
+    const { pageActionVisible: visible } = await chrome.storage.local.get("pageActionVisible");
+    await sendToFrame(tab.id, 0, { type: "SHOW_PAGE_ACTION", visible: visible !== false, result: { status: $("ai-status").textContent, diagnostics: lastAiDiagnostics } }).catch(() => {});
   } catch (error) {
     const detail = String(error.message || error);
     if (detail.includes("Failed to fetch")) { $("ai-status").textContent = ""; $("ai-status").className = ""; message("配置已保存，但本地 Node 代理未启动。请先运行 README 中的 node 命令。", false, "connect-status", "hint"); }
@@ -1403,11 +1481,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 async function showPageAction(tabId) {
+  const tab = await refreshPageReview(tabId);
   if (fillInProgress) return;
-  const tab = await chrome.tabs.get(tabId);
   if (!isWebPage(tab?.url)) return;
   await injectCurrentContent(tabId);
-  await sendToFrame(tabId, 0, { type: "SHOW_PAGE_ACTION" });
+  await sendToFrame(tabId, 0, { type: "SHOW_PAGE_ACTION", visible: pageActionVisible });
 }
 chrome.tabs.onActivated.addListener(({ tabId }) => showPageAction(tabId).catch(() => {}));
 

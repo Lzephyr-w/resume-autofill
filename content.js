@@ -3220,16 +3220,19 @@
     setTimeout(() => { if (target.isConnected && target.style.outline === "3px solid rgb(245, 158, 11)") target.style.outline = original; }, 3000);
     return { located: true };
   };
-  function showPageAction(result) {
-    if (window.top !== window || !result && fields().length < 4 || !runtime?.sendMessage) return { shown: false };
+  function showPageAction(result, visible) {
+    if (window.top !== window || !runtime?.sendMessage) return { shown: false };
     const existing = document.getElementById("resume-autofill-page-action");
-    if (!result && existing?.dataset.contentInstance === scanId && existing.querySelector("button")?.disabled) return { shown: true, protocol: CONTENT_PROTOCOL };
+    if (!result && !existing && fields().length < 4) return { shown: false };
     const panel = existing || document.createElement("aside");
     panel.id = "resume-autofill-page-action";
     panel.dataset.resumeAutofillUi = "true";
     panel.dataset.contentProtocol = String(CONTENT_PROTOCOL);
     panel.dataset.contentBuild = "100-virtual-city-committed-input";
     panel.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 32px);box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;gap:8px;padding:12px;background:white;color:#173e30;border:1px solid #b5d8c7;border-radius:10px;font:14px system-ui;box-shadow:0 4px 18px #0002";
+    if (typeof visible === "boolean") panel.dataset.pageActionVisible = String(visible);
+    if (panel.dataset.pageActionVisible === "false") panel.style.display = "none";
+    if (!result && existing?.dataset.contentInstance === scanId && existing.querySelector("button")?.disabled) return { shown: true, protocol: CONTENT_PROTOCOL };
     if (!result && existing?.dataset.contentInstance === scanId && existing.querySelector("details[data-section=diagnostics]") && existing.querySelector("details[data-section=review]")) return { shown: true, protocol: CONTENT_PROTOCOL };
     panel.dataset.contentInstance = scanId;
     const oldButton = panel.querySelector("button");
@@ -3334,7 +3337,7 @@
       FILL_PROFILE: () => fill(message.profile, message.options),
       APPLY_ASSIGNMENTS: () => applyAssignments(message.assignments),
       LOCATE_FIELD: () => locateField(message.key, message.locator),
-      SHOW_PAGE_ACTION: () => showPageAction(message.result)
+      SHOW_PAGE_ACTION: () => showPageAction(message.result, message.visible)
     };
     const type = String(message?.type || "");
     const suffix = `_V${CONTENT_PROTOCOL}`;

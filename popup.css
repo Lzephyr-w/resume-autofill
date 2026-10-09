@@ -7,11 +7,11 @@ html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, textarea::-webkit-
 html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, textarea::-webkit-scrollbar-thumb, #preview::-webkit-scrollbar-thumb { min-height: 24px; border: 1px solid transparent; border-radius: 99px; background: #d6e9dc; background-clip: padding-box; }
 html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, textarea::-webkit-scrollbar-thumb:hover, #preview::-webkit-scrollbar-thumb:hover { background: #a9d0b4; background-clip: padding-box; }
 .app-shell { padding-bottom: 14px; }
-.hero { min-height: clamp(210px, 31vw, 250px); padding: clamp(18px, 3vw, 28px) clamp(16px, 3vw, 28px) 20px; color: #fff; background-image: linear-gradient(90deg, rgba(6, 78, 59, .8) 0%, rgba(6, 78, 59, .38) 58%, rgba(6, 78, 59, .08) 100%), url("assets/hero-banner.png"); background-position: center; background-size: cover; background-repeat: no-repeat; box-shadow: 0 6px 18px rgba(4, 120, 87, .22); }
+.hero { min-height: clamp(148px, 24vw, 164px); padding: 16px clamp(14px, 3vw, 22px) 14px; color: #fff; background-color: #063d30; background-image: linear-gradient(90deg, rgba(3, 42, 32, .55) 0%, rgba(3, 42, 32, .48) 60%, rgba(3, 42, 32, .04) 100%), url("assets/hero-banner-atelier.png"); background-position: right center; background-size: cover; background-repeat: no-repeat; box-shadow: 0 6px 18px rgba(4, 120, 87, .22); }
 .eyebrow { margin-bottom: 10px; color: #bbf7d0; font-size: 10px; font-weight: 700; letter-spacing: .14em; }
 .hero-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 h1 { margin: 0; font-size: clamp(21px, 3.2vw, 30px); letter-spacing: -.02em; }
-.hero p { max-width: 32em; margin: 5px 0 0; color: #d1fae5; font-size: clamp(12px, 1.8vw, 16px); }
+.hero p { max-width: min(32em, calc(100% - 64px)); margin: 5px 0 0; color: #d1fae5; font-size: clamp(12px, 1.8vw, 16px); }
 .hero-mark { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(255,255,255,.3); border-radius: 11px; color: #d1fae5; font-size: 19px; }
 .privacy-note { display: flex; align-items: center; gap: 7px; margin-top: 14px; color: #d1fae5; font-size: 11px; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: #86efac; box-shadow: 0 0 0 3px rgba(134,239,172,.16); }
@@ -46,6 +46,14 @@ textarea::placeholder { color: #a5b1c2; }
 .actions-card { padding-bottom: 12px; }
 .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px 8px; }
 .action-statuses { display: grid; gap: 4px; margin-top: 8px; }
+.page-action-toggle { margin-top: 10px; color: var(--green-800); background: #f7fdf9; }
+.page-review { margin-top: 12px; padding-top: 10px; border-top: 1px solid #e3eaf4; }
+.page-review > summary { color: var(--green-800); font-weight: 700; cursor: pointer; }
+.page-review p { margin: 8px 0; }
+.review-fields { display: grid; gap: 6px; max-height: 260px; overflow: auto; overscroll-behavior: contain; }
+.review-fields button { text-align: left; overflow-wrap: anywhere; font-weight: 400; }
+.review-preview { display: block; width: 100%; max-height: 260px; margin-top: 10px; object-fit: contain; border: 1px solid #e3eaf4; border-radius: 8px; }
+.review-preview[hidden] { display: none; }
 button { width: 100%; min-height: 36px; padding: 8px 9px; border: 1px solid #d9e2ef; border-radius: 9px; color: #344054; background: #fff; cursor: pointer; font: 600 11px inherit; transition: transform .15s, box-shadow .15s, border-color .15s, background .15s; }
 button:hover { border-color: #9db7dc; background: #f8fbff; box-shadow: 0 3px 8px rgba(30,64,175,.08); transform: translateY(-1px); }
 button:active { transform: translateY(0); }
@@ -60,6 +68,7 @@ button.primary span { color: #d1fae5; }
 .preview-card { margin: 10px 14px 0; padding: 11px 12px; border: 1px solid #e3eaf4; border-radius: 12px; background: #f9fbfe; }
 .preview-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: #667085; font-size: 11px; font-weight: 700; }
 .preview-badge { padding: 2px 6px; border-radius: 99px; color: #15803d; background: #dcfce7; font-size: 9px; font-weight: 700; }
+#review-count:empty { display: none; }
 #preview { max-height: 120px; margin: 0; overflow: auto; white-space: pre-wrap; color: #526071; font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
 #preview:empty { display: none; }
 #status { min-height: 18px; margin: 10px 16px 0; font-size: 11px; font-weight: 600; }

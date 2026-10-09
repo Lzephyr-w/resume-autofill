@@ -210,6 +210,14 @@
       <div class="action-statuses">
         <div id="ai-status" class="action-status" role="status" aria-live="polite"></div>
       </div>
+      <button id="toggle-page-action" class="page-action-toggle" type="button" aria-pressed="true">隐藏页面浮窗</button>
+      <div id="page-tools-status" class="action-status" role="status" aria-live="polite"></div>
+      <details id="page-review" class="page-review" open>
+        <summary>截图核对 <span id="review-count" class="preview-badge"></span></summary>
+        <p id="review-hint" class="muted">填充后将在这里显示仍未填写的字段，点击可定位并截图。</p>
+        <div id="review-fields" class="review-fields"></div>
+        <img id="review-preview" class="review-preview" alt="当前页面本地截图，不会发送给模型" hidden>
+      </details>
     </section>
 
     <section class="preview-card">
