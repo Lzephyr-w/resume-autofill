@@ -3,7 +3,7 @@
   if ((globalThis.__resumeAutofillContentProtocol || 0) > CONTENT_PROTOCOL) return;
   if (globalThis.__resumeAutofillContentListener) globalThis.chrome?.runtime?.onMessage?.removeListener(globalThis.__resumeAutofillContentListener);
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
-  document.getElementById("resume-autofill-page-action")?.setAttribute("data-content-build", "100-scholarship-type-source");
+  document.getElementById("resume-autofill-page-action")?.setAttribute("data-content-build", "100-virtual-city-committed-input");
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
   const visible = (el) => {
     if (!el || getComputedStyle(el).visibility === "hidden") return false;
@@ -17,32 +17,50 @@
     for (let node = el; node; node = node.parentElement) if (Number(getComputedStyle(node).opacity) === 0 || getComputedStyle(node).display === "none") return false;
     return true;
   });
-  const editable = (el) => {
+  const uploadControl = (el) => {
     if (!el) return false;
-    const choice = el.type === "radio" || el.type === "checkbox" || el.getAttribute("role") === "radio" || el.getAttribute("role") === "checkbox";
-    const customPicker = el.getAttribute("role") === "combobox" || el.hasAttribute("aria-haspopup") || /select|cascader|calendar|date|area/i.test(String(el.className || "")) || el.readOnly && !!choiceRoot(el);
+    if (el.matches?.('input[type=file]')) return true;
+    const label = el.closest?.('label[for]');
+    if (label && document.getElementById(label.htmlFor)?.type === 'file') return true;
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      if (node.querySelector('input[type=file]') && (/(?:^|[\s_-])(?:upload|uploader)(?:$|[\s_-])/i.test(String(node.className || ''))
+        || !node.querySelector('input:not([type=file]):not([type=hidden]), textarea, select, [role=combobox], [role=radio], [role=checkbox], [aria-haspopup], [contenteditable=true]'))) return true;
+      if (node.matches('form, fieldset, section')) break;
+    }
+    return /^(?:上传|添加|选择|新增|upload|choose|select).*(?:文件|附件|照片|图片|file|attachment|photo)/i.test(clean(el.getAttribute?.('aria-label') || el.textContent)) && clean(el.textContent).length < 80;
+  };
+  const editable = (el) => {
+    if (!el || uploadControl(el)) return false;
+    const choice = el.type === "radio" || el.type === "checkbox" || el.getAttribute("role") === "radio" || el.getAttribute("role") === "checkbox" || el.matches(".phoenix-radio-group");
+    const customPicker = el.getAttribute("role") === "combobox" || el.hasAttribute("aria-haspopup") || /select|cascader|calendar|date|area/i.test(String(el.className || "")) || (el.readOnly || el.tagName === "BUTTON") && !!choiceRoot(el);
     const linkedLabel = el.id && [...document.querySelectorAll(`label[for="${CSS.escape(el.id)}"]`)].some(visible) || !!el.closest("label");
     const readonlySemantic = el.readOnly && /家庭|籍贯|居住|户籍|地区|日期|时间|省|市/.test(String(el.getAttribute("aria-label") || el.placeholder || el.name || el.id || el.parentElement?.innerText || ""));
     const blockedType = ["hidden", "file", "submit", "reset", "image"].includes(el.type) || el.type === "button" && !customPicker;
     const excluded = el.closest("[inert], [aria-hidden=true], nav, [role=search], [role=navigation], [role=listbox], [role=menu], [class*='select-popup'], [class*='select__dropdown'], [data-resume-autofill-ui]")
+      || el.closest("[class*='chatbot' i], [class*='chat-widget' i], [class*='chat-composer' i]")
       || el.type === "password" || el.type === "search" && el.getAttribute("role") !== "combobox" && !el.hasAttribute("aria-haspopup") || /one-time-code|password/.test(el.autocomplete || "")
       || /^(?:搜索|search|验证码|短信验证码|登录|login)(?:\b|$|职位|岗位|关键词)/i.test(clean(el.getAttribute("aria-label") || el.placeholder || el.name));
-    return !excluded && (visible(el) || (choice && linkedLabel)) && !el.disabled && el.getAttribute("aria-disabled") !== "true" && (!el.readOnly || customPicker || readonlySemantic) && !blockedType;
+    return !excluded && (visible(el) || (choice && linkedLabel)) && !el.disabled && !el.matches(".phoenix-radio-group--disabled") && el.getAttribute("aria-disabled") !== "true" && (!el.readOnly || customPicker || readonlySemantic) && !blockedType;
   };
-  const controlSelector = "input, textarea, select, [role=combobox], [role=radio], [role=checkbox], [contenteditable='true'], [aria-haspopup], .mtd-select-filter [role=button]:not(:has(input)), [tabindex='0'][class*='select'], [tabindex='0'][class*='Select']";
-  const fields = () => [...document.querySelectorAll(controlSelector)]
+  const controlSelector = "input, textarea, select, [role=combobox], [role=radio], [role=checkbox], .phoenix-radio-group:not(:has(input, [role=radio])), [contenteditable='true'], [aria-haspopup], .mtd-select-filter [role=button]:not(:has(input)), [tabindex='0'][class*='select'], [tabindex='0'][class*='Select'], .phoenix-select:not(:has(input)):has([class*='select__tag'])";
+  let schemaControls = null;
+  const fields = () => schemaControls || [...document.querySelectorAll(controlSelector)]
     .filter(editable)
     .filter((el) => el.matches("input, textarea, select, [role], [aria-haspopup], [contenteditable='true']") || ![...el.querySelectorAll(controlSelector)].some(editable))
     .filter((el, index, all) => all.indexOf(el) === index);
   const normalize = (value) => clean(value).toLowerCase().replace(/[：:（）()\[\]【】／\/\s_-]/g, "");
   const salaryRange = (value) => {
-    const text = clean(value).toLowerCase();
-    if (!text || /面议|保密/.test(text)) return null;
+    const text = clean(value).toLowerCase().replace(/\b\d{1,3}(?:[,，]\d{3})+(?!\d)/g, amount => amount.replace(/[,，]/g, ""));
+    if (!text || /面议|保密|[,，]/.test(text) || /^[-−]/.test(text)) return null;
     const found = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(万|w|k|千)?/g)];
     const sharedUnit = found.length > 1 && found.filter((match) => match[2]).length === 1 ? found.find((match) => match[2])?.[2] : "";
     const amounts = found.map(([, number, unit]) => Number(number) * (/万|w/.test(unit || sharedUnit) ? 10000 : /k|千/.test(unit || sharedUnit) ? 1000 : 1));
     if (!amounts.length || amounts.some((amount) => !Number.isFinite(amount))) return null;
     if (amounts.length === 1) {
+      if (/[<＜]/.test(text)) return [0, amounts[0] - 0.01];
+      if (/[>＞]/.test(text)) return [amounts[0] + 0.01, Infinity];
+      if (/≤/.test(text)) return [0, amounts[0]];
+      if (/≥/.test(text)) return [amounts[0], Infinity];
       if (/以下|以内|不超过|及以下/.test(text)) return [0, amounts[0]];
       if (/以上|起|及以上/.test(text)) return [amounts[0], Infinity];
       return [amounts[0], amounts[0]];
@@ -183,7 +201,7 @@
     const box = fieldContainer(el);
     const label = [...(box?.querySelectorAll(`${fieldLabelSelector}, label`) || [])]
       .find((node) => labelCaption(node) && !node.contains(el) && !node.querySelector(controlSelector));
-    const groupedChoice = ["radio", "checkbox"].includes(el?.type) || ["radio", "checkbox"].includes(el?.getAttribute?.("role"));
+    const groupedChoice = ["radio", "checkbox"].includes(el?.type) || ["radio", "checkbox"].includes(el?.getAttribute?.("role")) || el?.matches?.(".phoenix-radio-group");
     if (groupedChoice && box?.querySelectorAll("input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]").length > 1 && label) return clean(label.innerText || label.textContent || "");
     if ((el?.type === "checkbox" || el?.getAttribute?.("role") === "checkbox") && associatedLabels(el)[0]) return associatedLabels(el)[0];
     // A selector's wrapping <label> contains its selected value, not its field caption.
@@ -192,15 +210,18 @@
       if (/时间|日期/.test(caption) && /^(?:请选择|请输入)?(?:开始|结束)(?:日期|时间|月)$/.test(el?.placeholder || "")) return el.placeholder.replace(/^(?:请选择|请输入)/, "").replace(/月$/, "时间");
       if (/证件|身份证/.test(caption)) {
         const hint = clean(choiceRoot(el)?.querySelector("[class*=hint], [class*=placeholder]")?.textContent);
-        if (/证件类型/.test(hint) || /号码/.test(caption) && isChoiceControl(el)) return "证件类型";
+        if (/证件类型/.test(hint)) return "证件类型";
       }
       if (/证件|身份证|个人证件|手机|电话|外语类型|语言(?:类型|类别)|外语类别|英语等级|语言考试/.test(caption)) {
         const controls = [...box.querySelectorAll("input, select, textarea, [role=combobox]")].filter(visible)
           .filter(control => !control.querySelector("input, select, textarea, [role=combobox]"));
         if (controls.length === 2) {
-          if (/外语类型|语言(?:类型|类别)|外语类别/.test(caption) && controls.every(isChoiceControl)) return controls[0] === el ? "语言类型" : "语言考试";
-          const choice = controls.find(isChoiceControl);
-          const text = controls.find((control) => !isChoiceControl(control) && !control.readOnly);
+          // Search inputs inside selectors are choices too, even though their
+          // writing path uses autocomplete rather than isChoiceControl.
+          const choices = controls.filter(control => isChoiceControl(control) || isAutocompleteControl(control));
+          if (/外语类型|语言(?:类型|类别)|外语类别/.test(caption) && choices.length === 2) return controls[0] === el ? "语言类型" : "语言考试";
+          const choice = choices.length === 1 ? choices[0] : null;
+          const text = controls.find((control) => control !== choice && !control.readOnly);
           if (choice && text) return /英语等级|语言考试/.test(caption) ? choice === el ? "语言考试" : "考试分数"
             : /证件|身份证|个人证件/.test(caption) ? choice === el ? "证件类型" : "证件号码" : choice === el ? "电话区号" : "手机号码";
         }
@@ -220,12 +241,19 @@
     if (el.matches('input[type=checkbox], input[type=radio], [role=checkbox], [role=radio]')) return false;
     const wanted = [anchor, ...(typeof FIELD_ALIASES !== "undefined" ? (FIELD_ALIASES[anchor] || []) : [])].map(normalize);
     if (anchor === "学校名称" && /GPA|绩点|就读地|学校所在地|(?:学校|院校)(?:所在)?城市|导师|专业|学院|院系/i.test(fieldTitle(el))) return false;
-    if (anchor === "语言类型" && /语言考试|语言水平|外语等级|英语等级|考试分数|掌握程度|熟练程度|精通程度|听说|读写/.test(fieldTitle(el))) return false;
+    const identity = anchor === "语言类型" || ["掌握程度", "听说", "读写"].includes(anchor)
+      ? `${el.name || ""} ${el.id || ""}`.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().match(/[a-z]+|\d+/g) || [] : [];
+    const languageCategoryIdentity = ["language", "languages"].includes(identity.at(-1)) || ["language type", "language name"].includes(identity.slice(-2).join(" "));
+    const technicalLanguageIdentity = /(?:technical|programming|program|development) languages?(?:\s+\d+)?$/.test(identity.join(" "));
+    if (anchor === "语言类型" && (technicalLanguageIdentity || /(?:技术开发|编程|开发)语言|program(?:ming)?\s*language|technical\s*language|语言考试|语言水平|外语等级|英语等级|考试分数|proficiency|(?:languages?)[_-]?(?:rank|level)|speaking|reading|writing|listening|exam|score/i.test(`${fieldTitle(el)} ${el.getAttribute("aria-label")} ${el.getAttribute("placeholder")} ${el.name} ${el.id}`))) return false;
+    if (anchor === "语言类型" && languageCategoryIdentity) return true;
+    if (["掌握程度", "听说", "读写"].includes(anchor) && languageCategoryIdentity) return false;
+    if (anchor === "语言类型" && /掌握程度|熟练程度|精通程度|听说|读写/.test(fieldTitle(el))) return false;
     if (anchor === "证书名称" && /描述|说明|成绩|分数|时间|日期|其[它他]语言/.test(fieldTitle(el))) return false;
     if (/^(?:获奖项|奖项名称)$/.test(anchor) && /类型|类别|描述|说明|时间|日期|级别|等级/.test(fieldTitle(el))) return false;
     if (!/学号/.test(anchor) && /学号/.test(fieldTitle(el))) return false;
-    if (anchor === "GPA" && /类型|满分|满绩|制式|GPA[-\s_]*BASE/i.test(fieldTitle(el))) return false;
-    const text = normalize(`${semanticText(el)} ${labelText(el)}`);
+    if (anchor === "GPA" && /类型|总分|满分|满绩|制式|GPA[-\s_]*BASE/i.test(fieldTitle(el))) return false;
+    const text = normalize(fieldTitle(el) || `${semanticText(el)} ${labelText(el)}`);
     return wanted.some((value) => value && text.includes(value));
   };
   const sectionScope = (el) => {
@@ -266,17 +294,18 @@
     "教育经历": ["教育背景", "教育经历", "学历经历"],
     "工作经历": ["工作经验", "工作经历", "任职经历", "工作/实习经历", "工作与实习经历", "工作及实习经历"],
     "实习经历": ["实习经验", "实习经历"],
+    "学生干部经历": ["学生干部经历", "干部经历", "校园经历", "社团经历", "在校实践", "校内实践"],
     "项目经验": ["项目经历", "项目经验", "项目经验"],
     "项目经历": ["项目经验", "项目经历"],
-    "技能": ["技能", "专业技能", "技能特长"],
+    "技能": ["技能", "专业技能", "技能特长", "计算机能力"],
     "证书": ["证书", "资格证书", "证书信息"],
     "英语能力": ["英语能力", "英语证书", "英语水平", "英语考试"],
     "获奖经历": ["获奖", "获奖情况", "获奖经历", "竞赛/获奖经历", "竞赛获奖", "竞赛经历", "竞赛", "大赛经历", "大赛/获奖经历", "奖励与荣誉", "奖励荣誉", "荣誉"],
     "竞赛": ["竞赛", "大赛", "比赛"],
     "荣誉": ["荣誉", "奖励", "奖学金"],
-    "语言能力": ["语言技能", "语言能力", "语言水平", "外语能力", "语言证书"],
+    "语言能力": ["语言技能", "语言能力", "语言水平", "外语能力", "其他外语能力", "其它外语能力", "语言类别", "外语类别", "语言证书"],
     "个人评价": ["个人评价", "自我评价", "自我描述"],
-    "学生干部经历": ["学生干部经历", "干部经历", "校园经历", "社团经历"]
+    "学生干部经历": ["学生干部经历", "干部经历", "校园经历", "社团经历", "在校实践", "校内实践"]
   };
   const awardModule = title => /竞赛|大赛|比赛/.test(title) ? /荣誉|奖励|奖学金|评奖|评优|表彰/.test(title) ? "获奖经历" : "竞赛"
     : /荣誉|奖励|奖学金|评奖|评优|表彰/.test(title) ? "荣誉" : "获奖经历";
@@ -284,6 +313,14 @@
     const value = normalize(title);
     return /基本信息|基本资料|个人信息|求职意向|应聘信息|实践经历|资料证明人/.test(value)
       || Object.entries(SECTION_ALIASES).some(([name, aliases]) => [name, ...aliases].map(normalize).some((item) => item && value.includes(item)));
+  };
+  const languageCategoryButton = (el) => /^[+＋]?(?:添加|新增)\s*(?:外语|语言)\s*(?:类别|类型|语种)$/.test(normalize(el?.innerText || el?.textContent));
+  const languageCategoryScope = (el) => {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      if ([...node.querySelectorAll("button, a, [role=button]")].some(languageCategoryButton)
+        && [...node.children].some(child => /^(?:外语|语言)(?:类别|类型|语种)$/.test(normalize(child.innerText || child.textContent)))) return node;
+    }
+    return null;
   };
   const combinedExperience = (title) => /工作\s*(?:[\/／、]|与|及|和)\s*实习|实习\s*(?:[\/／、]|与|及|和)\s*工作/.test(title || "");
   const moduleTitles = () => [...new Set([...fields().map(sectionTitle), ...document.querySelectorAll("h1, h2, h3, h4, legend, [role=heading], [class*='title'], [class*='Title'], div, span")]
@@ -295,6 +332,9 @@
   const inSection = (el, section) => {
     if (!section) return true;
     if (section === "实习经历" && combinedExperience(sectionTitle(el))) return false;
+    if ((section === "语言能力" || (SECTION_ALIASES["语言能力"] || []).some(alias => normalize(alias) === normalize(section)))
+      && anchorMatch(el, "语言类型") && (languageCategoryScope(el)
+        || section === "语言能力" && [...(sectionScope(el)?.querySelectorAll("button, a, [role=button]") || [])].some(languageCategoryButton))) return true;
     const title = normalize(sectionTitle(el));
     if (!title) return !["竞赛", "荣誉"].includes(section);
     if (["获奖经历", "竞赛", "荣誉"].includes(section) && awardModule(title) !== section) return false;
@@ -313,6 +353,9 @@
       && !formControls.some(control => hasKnownSection(sectionTitle(control)) && !inSection(control, rowSection))) return formRow;
     const componentRow = el?.closest?.("div.form[id]");
     if (componentRow) return componentRow;
+    // This walk is synchronous: collect candidates once, then test ownership.
+    const candidates = [...document.querySelectorAll(controlSelector)].filter(editable);
+    const matching = candidates.filter(control => anchorMatch(control, anchor));
     let node = el;
     // Some component forms (including Phoenix) wrap each repeated row deeply;
     // stop only after reaching the actual sibling record, not an inner field.
@@ -323,12 +366,12 @@
       // page-level title here: generic wrappers otherwise collapse every row
       // to its first field and make date ranges cross-fill.
       const siblings = [...parent.children].filter((sibling) =>
-        [...sibling.querySelectorAll(controlSelector)].some((control) => editable(control) && anchorMatch(control, anchor)));
+        matching.some(control => sibling !== control && sibling.contains(control)));
       if (siblings.length > 1) return node;
     }
     for (let node = el.parentElement, depth = 0; node && depth < 12; node = node.parentElement, depth++) {
-      const controls = [...node.querySelectorAll(controlSelector)].filter(editable);
-      const anchors = controls.filter((control) => anchorMatch(control, anchor));
+      const controls = candidates.filter(control => node !== control && node.contains(control));
+      const anchors = matching.filter(control => node !== control && node.contains(control));
       if (anchors.length > 1) break;
       if (anchors.length === 1 && controls.length > 1) return node;
     }
@@ -358,6 +401,8 @@
     if (label === "项目职务") return titled.find(({ control, title }) => title === normalize("职责") && !control.matches("textarea, [contenteditable='true']"))?.control || null;
     return null;
   };
+  const rowDescription = (row) => controlValue([...(row?.querySelectorAll("textarea") || [])]
+    .find(control => isDescription(fieldTitle(control) || labelText(control))));
   const rowField = (anchor, rowIndex, label, section = "", value = "") => {
     const candidate = rowContainers(anchor, section)[rowIndex];
     // A missing repeated row is not permission to reuse a similarly named
@@ -447,12 +492,14 @@
     return "";
   };
   const repeatIndex = (el, anchor) => {
-    const row = repeatedContainer(el, anchor || semanticText(el));
-    const rows = row.parentElement ? [...row.parentElement.children].filter((sibling) => [...sibling.querySelectorAll(controlSelector)].some((control) => editable(control) && anchorMatch(control, anchor || semanticText(el)))) : [];
+    const label = anchor || semanticText(el);
+    const row = repeatedContainer(el, label);
+    const matching = row.parentElement ? [...row.parentElement.querySelectorAll(controlSelector)].filter(control => editable(control) && anchorMatch(control, label)) : [];
+    const rows = row.parentElement ? [...row.parentElement.children].filter(sibling => matching.some(control => sibling !== control && sibling.contains(control))) : [];
     return Math.max(0, rows.indexOf(row));
   };
   const controlType = (el) => !el ? "" : el.matches("[role=combobox], [aria-haspopup=listbox]") ? "combobox"
-    : el.matches("[role=radio]") || el.type === "radio" ? "radio"
+    : el.matches("[role=radio], .phoenix-radio-group") || el.type === "radio" ? "radio"
       : el.matches("[role=checkbox]") || el.type === "checkbox" ? "checkbox"
         : el.isContentEditable ? "contenteditable" : el.tagName === "SELECT" ? "select" : String(el.type || el.tagName).toLowerCase();
   const choiceRoot = (el) => {
@@ -460,6 +507,7 @@
       if (node === el && node.matches("input, textarea")) continue;
       const controls = [...node.querySelectorAll(controlSelector)].filter(visible);
       if (node !== el && controls.filter((control) => !controls.some((other) => other !== control && control.contains(other))).length > 1) break;
+      if (!node.hasAttribute('role') && !node.hasAttribute('aria-haspopup') && /dropdown[-_]+open(?:$|\s)/i.test(String(node.className || ''))) continue;
       if (!node.hasAttribute("role") && !node.hasAttribute("aria-haspopup") && /search|input|content|rendered|selection[-_]overflow|selection[-_]item/i.test(String(node.className || ""))
         && !/date|month|calendar|(?:select|dropdown)[-_]*container(?:[\s_-]|$)/i.test(String(node.className || ""))
         && !(/picker/i.test(String(node.className || "")) && !/content|rendered/i.test(String(node.className || "")))) continue;
@@ -468,18 +516,47 @@
     }
     return el?.matches("input, textarea") && /(^|[\s_-])(select|dropdown|cascader|picker|autocomplete|date[-_]editor)([\s_-]|$)/i.test(String(el.className || "")) ? el : null;
   };
+  const choiceTrigger = (el) => {
+    for (let node = el?.parentElement; node && node !== document.body; node = node.parentElement)
+      if (node.matches("button, [role=button], [aria-haspopup], [tabindex='0'], [class*='trigger'], [class*='Trigger'], [class*='selector'], [class*='Selector']")
+        && (node.matches("button, [role=button], [aria-haspopup]") || !/search|input|content|overflow|suffix/i.test(String(node.className || "")))) return node;
+    const root = choiceRoot(el);
+    return root && !/(?:^|[\s_-])(?:date|month|calendar)(?:$|[\s_-])/i.test(String(root.className || "")) ? root : el;
+  };
+  const isSearchableChoiceInput = (el) => el?.tagName === "INPUT" && !el.readOnly && !["date", "month"].includes(el.type)
+    && !fullDateRange(el).includes(el) && !!choiceRoot(el) && choiceTrigger(el) !== el;
   const isExplicitTextInput = (el) => el?.tagName === "INPUT" && !el.readOnly && !el.getAttribute("role") && !el.hasAttribute("aria-haspopup")
-    && !!el.closest("[class*='string_info'], [class*='string-info'], [class*='stringInfo'], [data-field-type='string_info']");
-  const isSuggestionControl = (el) => el?.tagName === "INPUT" && !el.readOnly && /auto[-_]?complete|suggest|typeahead|select[-_ ]search/i.test([
+    && el.closest("[class*='string_info'], [class*='string-info'], [class*='stringInfo'], [data-field-type='string_info']")?.querySelectorAll('input:not([type=hidden]), textarea, select').length === 1;
+  const isSuggestionControl = (el) => el?.tagName === "INPUT" && !el.readOnly && (/auto[-_]?complete|suggest|typeahead|select[-_ ]search/i.test([
     el.className, el.getAttribute("aria-autocomplete"), el.parentElement?.className, el.parentElement?.getAttribute("role"), el.closest("[class*='auto-complete'], [class*='auto_complete'], [class*='autocomplete']")?.className
-  ].join(" "));
-  const isAutocompleteControl = (el) => isSuggestionControl(el) || isExplicitTextInput(el) && !!choiceRoot(el);
+  ].join(" ")) || el.type === "search" && el.getAttribute("role") === "combobox" || /^(?:list|both|inline)$/i.test(el.getAttribute("aria-autocomplete") || ""));
+  const isAutocompleteControl = (el) => isSuggestionControl(el) || isExplicitTextInput(el) && !!choiceRoot(el)
+    || el?.tagName === "INPUT" && !el.readOnly
+    && !["date", "month"].includes(el.type) && !fullDateRange(el).includes(el)
+    && (el.hasAttribute("options") || el.closest('[class*="dropdown-open"], [class*="dropdown_open"]'))
+    && /(?:^|[\s_-])(?:select|autocomplete)(?:$|[\s_-])/i.test(String(choiceRoot(el)?.className || ""));
+  const isSchoolLabel = label => /^(?:毕业学校|毕业院校|最高学历学校|学校|院校|学校名称|学校全称|院校名称|就读学校)[＊*]?$/.test(clean(label));
   const isLocationLabel = (label) => /家庭|家乡|籍贯|居住|户籍|户口|城市|所在地点|所在地|就读地|(?:工作|期望).*地点/.test(label);
   const isChoiceControl = (el) => !!el && !isExplicitTextInput(el) && (el.tagName === "SELECT" || ["radio", "checkbox"].includes(el.type)
+    || el.matches(".phoenix-radio-group")
     || ["combobox", "radio", "checkbox"].includes(el.getAttribute("role")) || el.hasAttribute("aria-haspopup") || !!choiceRoot(el)
     || el.tagName === "INPUT" && !["date", "month"].includes(el.type) && fullDateRange(el).includes(el)) && !isSuggestionControl(el);
+  const confirmedSingleLocationSources = new WeakMap();
+  const isMultipleChoice = (control, popup) => {
+    const marked = node => node?.getAttribute?.("aria-multiselectable") === "true" || node?.hasAttribute?.("multiple")
+      || !/(?:^|[\s_-])(?:not|non|no)[-_]+multi(?:ple)?(?:$|[\s_-])/i.test(String(node?.className || ""))
+        && /(?:^|[\s_-])(?:is-)?multi(?:ple)?(?:$|[\s_-])|select[-_]*multiple/i.test(String(node?.className || ""));
+    const root = choiceRoot(control);
+    for (let node = control; node && node !== document.body; node = node.parentElement) {
+      if (marked(node)) return true;
+      if (node === root || !root) break;
+    }
+    return [...(root?.querySelectorAll('[class], [multiple], [aria-multiselectable]') || [])].some(marked)
+      || marked(popup) || !!popup?.querySelector?.('input[type="checkbox"], [role="checkbox"]');
+  };
   const controlValue = (el, box = fieldContainer(el)) => {
     if (!el) return "";
+    if (el.matches(".phoenix-radio-group")) return clean(el.querySelector(".phoenix-radio--checked, .phoenix-radio--selected, [aria-checked=true]")?.textContent);
     if (!el.isConnected) {
       const relocated = resolveField(elementKeys.get(el));
       if (relocated) return controlValue(relocated);
@@ -505,9 +582,18 @@
         node !== el && clean(node.textContent) && !/placeholder/i.test(String(node.className || "")) && !/^(?:请输入|请选择)|^please select$/i.test(clean(node.textContent)));
       const display = displays.find((node) => /display-value|selection-item|selection[-_]+choice|single-?value|selectitem|select-filter-label|(?:select|selector)[-_]*(?:value|tag|item)|multi-?value|selected/i.test(String(node.className || "")))
         || displays.find((node) => /calc(?:ele)?/i.test(String(node.className || "")) && !/^(?:请输入|请选择)/.test(clean(node.textContent)));
+      const tags = [...(scope?.querySelectorAll?.("[class*='tag'], [class*='Tag']") || [])]
+        .filter((node) => visible(node) && clean(node.textContent) && !/placeholder/i.test(String(node.className || "")))
+        .map((node) => clean(node.textContent));
+      const ownValue = liveControl === el && el.matches?.("button, [role=button], [aria-haspopup]") ? clean(el.textContent) : "";
       const selectionDisplay = scope?.querySelector?.("[class*='display-value'], [class*='selectItem'], [class*='selection-item'], [class*='select-filter-label']");
-      const typedValue = selectionDisplay || isAutocompleteControl(liveControl) && popupFor(liveControl, false).length ? "" : liveControl?.value;
-      return clean(liveControl?.getAttribute("aria-valuetext") || typedValue || display?.textContent || "");
+      const typedValue = clean(selectionDisplay?.textContent) || pendingSuggestions.has(liveControl)
+        || isAutocompleteControl(liveControl) && popupFor(liveControl, false).length ? "" : liveControl?.value;
+      const selectedValues = [...new Set([...tags, ...displays.filter(node => /selection-item|selection[-_]+choice|(?:select|selector)[-_]*(?:tag|item)|multi-?value|selected/i.test(String(node.className || ""))
+        ).map(node => clean(node.textContent)).filter(Boolean)])];
+      const multipleDisplay = selectedValues.length > 1 || isMultipleChoice(liveControl || el) ? selectedValues.join("、") : "";
+      const value = clean(liveControl?.getAttribute("aria-valuetext") || typedValue || multipleDisplay || display?.textContent || tags.join("") || ownValue);
+      return /^(?:请选择|请输入|please select(?:\b|$)|select(?:\s|$))/i.test(value) ? "" : value;
     }
     return clean(el.value ?? el.getAttribute("aria-valuetext") ?? (el.isContentEditable ? el.innerText : ""));
   };
@@ -520,13 +606,13 @@
   };
   // ponytail: one DOM-label heuristic covers Vue/React forms; add site selectors only when a real page needs them.
   const FIELD_ALIASES = {
-    "国家/地区": ["国籍/地区", "国家／地区", "国家地区", "国家或地区", "国家（地区）", "国家(地区)", "国家", "country/region", "countryRegion", "country"],
+    "国家/地区": ["国籍（地区）", "国籍(地区)", "国籍/地区", "国籍", "国家／地区", "国家地区", "国家或地区", "国家（地区）", "国家(地区)", "国家", "country/region", "countryRegion", "country"],
     "姓名": ["姓名", "名字", "真实姓名", "中文姓名"],
     "手机号码": ["手机", "手机号", "手机号码", "联系电话", "电话号码"],
     "邮箱": ["邮箱", "电子邮箱", "邮件地址", "email", "e-mail"],
     "出生日期": ["出生日期", "出生年月", "生日", "birthday"],
     "年龄": ["年龄", "周岁"],
-    "民族": ["民族"],
+    "民族": ["民族", "民族类别", "民族名称"],
     "政治面貌": ["政治面貌", "政治身份"],
     "微信号": ["微信", "微信号", "wechat"],
     "证件类型": ["证件类型", "证件种类", "个人证件"],
@@ -537,7 +623,7 @@
     "学院名称": ["学院", "院系", "所属学院", "学院名称"],
     "专业名称": ["专业", "所学专业", "就读专业", "主修专业", "专业名称"],
     "GPA": ["GPA成绩", "GPA", "绩点", "平均学分绩点"],
-    "GPA类型": ["GPA类型", "绩点类型", "绩点满分", "绩点制式", "GPA-BASE", "满绩绩点"],
+    "GPA类型": ["GPA类型", "GPA总分", "总分", "绩点类型", "绩点满分", "绩点制式", "GPA-BASE", "满绩绩点"],
     "最高学历": ["学历", "教育程度", "最高学历", "学位"],
     "性别": ["gender", "男女", "性别"],
     "工作经验": ["工作年限", "工作经验", "经验"],
@@ -555,7 +641,7 @@
     "项目经验": ["项目经历", "项目经验"],
     "实习经历": ["实习经验", "实习经历"],
     "证书": ["证书", "资格证书", "证书信息"],
-    "语言类型": ["语言", "语言类型", "语言类别", "外语类别", "语种", "语言名称"],
+    "语言类型": ["语言", "语言类型", "语言类别", "外语类别", "语种", "语言名称", "language", "languages", "foreign language", "language type", "language name"],
     "掌握程度": ["掌握程度", "熟练程度", "精通程度", "语言水平", "技能等级", "等级自评"],
     "听说": ["听说", "听力口语", "听力", "口语"],
     "读写": ["读写", "阅读写作", "阅读", "写作"],
@@ -565,15 +651,15 @@
     "获奖级别": ["奖项级别", "奖励级别", "获奖等级", "获奖级别", "大赛等级", "大赛级别", "比赛等级", "竞赛等级", "荣誉等级"],
     "籍贯": ["籍贯", "家乡"],
     "户口所在地": ["户籍所在地", "户籍地", "户口所在地", "户籍地址"],
-    "培养方式": ["学习方式", "就读方式", "受教育类型", "学历类型"],
-    "学历类型": ["培养方式", "学习方式", "就读方式", "受教育类型", "是否全日制"],
-    "工作描述": ["工作职责", "工作内容", "工作说明"],
-    "工作职责": ["工作描述", "工作内容", "工作说明", "校园经历描述"],
+    "培养方式": ["学习方式", "学习形式", "就读方式", "受教育类型", "学历类型"],
+    "学历类型": ["培养方式", "学习方式", "学习形式", "就读方式", "受教育类型", "是否全日制"],
+    "工作描述": ["工作职责", "工作内容", "工作说明", "实践描述", "实践内容", "实践说明"],
+    "工作职责": ["工作描述", "工作内容", "工作说明", "校园经历描述", "实践描述", "实践内容", "实践说明"],
     "工作性质": ["工作类型", "工作性质"],
     "工作亮点": ["工作成果", "业绩亮点", "工作成就", "工作业绩", "亮点", "业绩"],
     "个人评价": ["个人评价", "自我评价", "自我描述", "评价内容"],
     "获奖情况": ["奖励活动", "获奖经历", "奖项"],
-    "现居住地": ["当前居住地", "当前所在地", "现居地", "居住地", "所在地", "所在地点"],
+    "现居住地": ["当前居住地", "当前居住城市", "目前居住城市", "现居住城市", "居住城市", "当前所在地", "现居地", "居住地", "所在地", "所在地点"],
     "学历": ["学位", "最高学历"],
     "公司名称": ["企业名称", "单位名称", "公司/单位"],
     "职位名称": ["职位", "职务", "岗位", "工作岗位", "任职职位", "任职岗位"],
@@ -586,17 +672,18 @@
     "离职原因": ["离职原因", "离职缘由"],
     "项目名称": ["项目名称", "项目标题"],
     "项目链接": ["项目链接", "项目地址", "项目网址", "在线链接", "演示地址", "GitHub链接", "Github链接"],
-    "项目职务": ["职务", "项目角色", "角色"],
+    "项目职务": ["职务", "项目角色", "角色", "在项目中担任的角色"],
     "项目职责": ["职责", "项目中职责", "个人工作"],
     "获奖项": ["获奖名称", "奖励活动", "奖项名称", "奖项", "竞赛名称", "荣誉名称", "获奖大赛"],
     "获奖描述": ["奖励描述", "荣誉描述", "奖项说明", "获奖说明"],
     "证书名称": ["证书", "资格证书"],
     "证书描述": ["描述", "说明", "证书说明"],
     "获得时间": ["获奖时间", "取得时间", "日期"],
-    "职务": ["职务", "干部职务", "担任职务", "角色"],
+    "职务": ["职务", "干部职务", "担任职务", "角色", "实践名称", "实践项目", "活动名称"],
+    "成绩排名": ["成绩排名", "专业排名", "排名"],
     "级别": ["级别", "组织级别", "活动级别"],
     "分数": ["分数", "成绩", "证书成绩"],
-    "技能名称": ["技能名称", "专业技能", "技能特长"],
+    "技能名称": ["技能名称", "专业技能", "技能特长", "编程语言", "开发语言", "程序设计语言", "计算机语言"],
     "使用时间总计": ["使用时间总计", "使用时间", "使用时长", "熟练年限"],
     "技能描述": ["技能描述", "技能说明", "技能详情"]
   };
@@ -605,10 +692,14 @@
     // Keep this tied to that composite DOM feature, not a recruiting domain.
     const idCard = document.querySelector("#id-card-select-component");
     if (idCard && label === "证件类型") return idCard.querySelector("[role=combobox]") || undefined;
-    if (idCard && label === "证件号码") return idCard.querySelector("input:not([type=hidden])") || undefined;
+    if (idCard && label === "证件号码") {
+      const numbers = [...idCard.querySelectorAll("input:not([type=hidden])")].filter(el => editable(el) && !el.readOnly && !isChoiceControl(el));
+      if (numbers.length === 1) return numbers[0];
+    }
+    const controls = fields();
     // Composite identity fields put the document type and number under one caption.
     if (label === "证件号码") {
-      const groups = fields().filter((el) => /个人证件|证件类型/.test(fieldTitle(el)))
+      const groups = controls.filter((el) => /个人证件|证件类型/.test(fieldTitle(el)))
         .map((el) => fieldContainer(el)).filter((box, index, all) => box && all.indexOf(box) === index);
       const numbers = groups.flatMap((box) => [...box.querySelectorAll("input")]
         .filter((el) => editable(el) && !el.readOnly && !isChoiceControl(el)));
@@ -621,11 +712,12 @@
       if (wanted.includes(normalize(fieldTitle(el).replace(/[＊*]/g, "")))) score += 250;
       if (wanted.some((value) => attrs.includes(value.replace(/名称|号码|税前/g, "")))) score += 20;
       if ((label === "现居住地" || label === "所在地") && /户口|户籍|籍贯/.test(attrs)) score = 0;
+      if (label === "现居住地" && /家庭|家乡|学校|院校|就读|期望|意向|工作|办公|任职|教育|实习|项目/.test(`${fieldTitle(el)} ${moduleTitle(el)}`)) score = 0;
       if (label === "姓名" && /拼音|pinyin|英文|english|first.?name|last.?name|given.?name|family.?name/i.test(attrs)) score = 0;
       if (/^(?:姓名|手机号码|邮箱)$/.test(label) && /证明人|联系人|推荐人|家属|监护人|父亲|母亲|导师|辅导员/.test(`${attrs} ${moduleTitle(el)}`)) score = 0;
       if (/手机|电话/.test(label) && /区号/.test(fieldTitle(el)) && !/区号/.test(label)) score = 0;
       if (/证件类型|证件号码/.test(label) && /证件类型|证件号码/.test(fieldTitle(el)) && label !== fieldTitle(el)) score = 0;
-      if (label === "GPA" && /类型|满分|满绩|制式|GPA[-\s_]*BASE/i.test(fieldTitle(el))) score = 0;
+      if (label === "GPA" && /类型|总分|满分|满绩|制式|GPA[-\s_]*BASE/i.test(fieldTitle(el))) score = 0;
       if (/^(?:获奖项|奖项名称)$/.test(label) && /类型|类别|描述|说明|时间|日期|级别|等级/.test(fieldTitle(el))) score = 0;
       if (label === "籍贯" && /户口|户籍/.test(attrs)) score = 0;
       if (/^期望/.test(label) && /^(?:现|当前|目前)/.test(clean(fieldTitle(el)))) score = 0;
@@ -633,10 +725,10 @@
       if (score && /手机|电话/.test(label) && el.tagName !== "SELECT") score += 15;
       if (score && /邮箱|email/i.test(label) && el.type === "email") score += 15;
       return { el, score };
-    }).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score || fields().indexOf(a.el) - fields().indexOf(b.el));
-    const scoped = scoreFields(fields().filter((el) => inSection(el, section)));
-    const candidates = ["竞赛", "荣誉"].includes(section) ? scoped : scoped.length || !section ? scoped.length ? scoped : scoreFields(fields())
-      : scoreFields(fields().filter((el) => !hasKnownSection(sectionTitle(el))));
+    }).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score || controls.indexOf(a.el) - controls.indexOf(b.el));
+    const scoped = scoreFields(controls.filter((el) => inSection(el, section)));
+    const candidates = ["竞赛", "荣誉"].includes(section) ? scoped : scoped.length || !section ? scoped.length ? scoped : scoreFields(controls)
+      : scoreFields(controls.filter((el) => !hasKnownSection(sectionTitle(el))));
     return atsxSearchInput(candidates[occurrence]?.el);
   }
   const fieldMatches = (label) => {
@@ -682,10 +774,22 @@
     if (el.tagName === "SELECT") {
       const options = [...el.options];
       const exact = options.find((item) => normalize(item.textContent) === normalize(value) || item.value === value);
-      const semantic = options.filter((item) => normalize(item.textContent).includes(normalize(value)) || normalize(value).includes(normalize(item.textContent)));
-      const option = exact || (/薪|工资|待遇/.test(labelText(el)) && salaryOption(value, options))
-        || (/排名/.test(labelText(el)) && rankOption(value, options))
-        || proficiencyOption(value, options, labelText(el)) || (semantic.length === 1 ? semantic[0] : null);
+      const optionLabel = labelText(el);
+      const educationLabel = /学历类型|受教育类型|培养方式|学习形式|学习方式|就读方式/.test(optionLabel);
+      const educationOption = educationLabel && /全日制|统招|非统招|自学考试/.test(String(value))
+        ? options.find((item) => {
+          const text = normalize(item.textContent);
+          return /非统招/.test(value) ? /非统招/.test(text)
+            : /非全日制/.test(value) ? /非全日制/.test(text)
+              : /自学考试/.test(value) ? /自学考试/.test(text)
+                : /统招/.test(value) ? /统招/.test(text) && !/非统招/.test(text)
+                  : /全日制/.test(value) ? /全日制/.test(text) && !/非全日制/.test(text)
+                    : false;
+        }) : null;
+      const semantic = educationLabel || isSchoolLabel(fieldTitle(el) || optionLabel) ? [] : options.filter((item) => normalize(item.textContent).includes(normalize(value)) || normalize(value).includes(normalize(item.textContent)));
+      const option = exact || educationOption || (/薪|工资|待遇/.test(optionLabel) && salaryOption(value, options))
+        || (/排名/.test(optionLabel) && rankOption(value, options))
+        || proficiencyOption(value, options, optionLabel) || (semantic.length === 1 ? semantic[0] : null);
       if (!option) return false;
       el.value = option.value;
       lastChoice = { ...(lastChoice || {}), selectedValue: option.value, confirmed: true };
@@ -742,14 +846,15 @@
   console.assert(dateParts("2025")[0] === "2025");
   const looksLikeDate = (value) => /^\s*\d{4}\s*(?:年|[./-])\s*\d{1,2}(?:\s*(?:月|[./-])\s*\d{1,2})?\s*(?:月|日)?\s*$/.test(String(value || ""));
   const isDescription = (label) => /描述|职责|评价|亮点/.test(normalize(label));
-  const popupSelector = "[role=listbox], [role=menu], [role=dialog], [role=grid], [class*='cascader-menus'], [class*='popup'], [class*='Popup'], [class*='dropdown'], [class*='Dropdown'], [class*='popover'], [class*='Popover'], [class*='picker'], [class*='Picker'], [class*='calendar'], [class*='Calendar'], [class*='options'], [class*='Options'], [class*='unmodeled-layer'], [class*='selector-container'], [class*='autocomplete'], [class*='Autocomplete'], [class*='suggest'], [class*='Suggest']";
+  const popupSelector = "[role=listbox], [role=menu], [role=dialog], [role=grid], [class*='cascader-menus'], [class*='popup'], [class*='Popup'], [class*='dropdown'], [class*='Dropdown'], [class*='popover'], [class*='Popover'], [class*='picker'], [class*='Picker'], [class*='calendar'], [class*='Calendar'], [class*='options'], [class*='Options'], [class*='unmodeled-layer'], [class*='selector-container'], [class*='autocomplete'], [class*='Autocomplete'], [class*='suggest'], [class*='Suggest'], [class*='menu'], [class*='Menu'], [class*='listbox'], [class*='Listbox'], [data-popper-placement], [data-floating-ui-portal]";
   const isPopup = (el) => {
-    if (!visible(el)) return false;
+    if (!visible(el) || uploadControl(el) || el.closest('[aria-hidden="true"], [hidden], [inert]') || /(?:^|[\s_-])(?:leave|exit)(?:$|[\s_-])/i.test(String(el.className || ""))) return false;
+    if (el.closest('header, nav, footer, [role=navigation], [role=banner], [role=contentinfo], [data-resume-autofill-ui]') || /(?:^|[\s_-])(?:header|navbar|navigation|footer)(?:$|[\s_-])/i.test(String(el.className || ""))) return false;
     if (el.matches("[role=listbox], [role=menu], [role=dialog], [role=grid]")) return true;
     if (/dropdown/i.test(String(el.className)) && (el.querySelector("[role=option], [role=listbox]") || /select[-_]dropdown/i.test(String(el.className)))) return true;
     const style = getComputedStyle(el);
     return (style.position === "fixed" || style.position === "absolute") && (/(?:picker|select|dropdown)[-_]+(?:panel|popup|popper)(?:[\s_-]|$)/i.test(String(el.className)) || !!el.querySelector("[role=option], [role=checkbox], input[type=checkbox], li, [data-value], [class*='option'], [class*='Option'], [class*='item'], [class*='Item'], [class*='picker'][class*='cell'], [role=grid], table td[title]")
-      || !!el.querySelector("[class*='calendar'] [role=button], [class*='month-table'] td, [class*='date-table'] td, [class*='date-range-picker'] td"));
+      || !!el.querySelector("[class*='calendar'] [role=button], [class*='month-table'] td, [class*='date-table'] td, [class*='date-range-picker'] td, [class*='tree'][class*='node'] [class*='label']"));
   };
   const openDropdowns = () => {
     const known = [...document.querySelectorAll(popupSelector)].filter(isPopup).map((popup) => {
@@ -759,58 +864,116 @@
       }
       return popup;
     });
-    // ponytail: scan generic fixed/absolute portals only when semantic/class hooks miss; keep normal closes cheap.
-    const candidates = known.length ? known : [...document.querySelectorAll("body *")].filter(isPopup);
+    // Generic portals have no selector hook; check position before inspecting their descendants.
+    const generic = [...document.querySelectorAll("body *")].filter(el => /^(?:fixed|absolute)$/.test(getComputedStyle(el).position)).filter(isPopup);
+    const candidates = [...new Set([...known, ...generic])];
     return candidates.filter((popup) => !candidates.some((other) => other !== popup && other.contains(popup)));
   };
   const popupFor = (control, includeGlobal = true) => {
     const linked = control?.getAttribute?.("aria-controls") ? document.getElementById(control.getAttribute("aria-controls")) : null;
-    const popupVisible = (popup) => !!popup && visible(popup) && !popup.hidden && (isPopup(popup) || popup.matches("[role=tree]")
+    const popupVisible = (popup) => !!popup && !popup.contains(control) && visible(popup) && !popup.closest('[aria-hidden="true"], [hidden], [inert]') && !/(?:^|[\s_-])(?:leave|exit)(?:$|[\s_-])/i.test(String(popup.className || "")) && (isPopup(popup) || popup.matches("[role=tree]")
       || !popup.matches(controlSelector) && /dropdown|popover|options|calendar.*panel|unmodeled-layer|selector-container|autocomplete|suggest/i.test(String(popup.className || "")) && popupOptionNodes(popup).length > 0);
     const owned = [linked, control?.nextElementSibling].filter(popupVisible);
-    const localRoot = choiceRoot(control)?.parentElement || control?.parentElement;
+    const root = choiceRoot(control);
+    const localRoot = root?.parentElement || control?.parentElement;
     const local = [...(localRoot?.querySelectorAll?.(popupSelector) || [])].filter(popupVisible);
-    const anchor = (choiceRoot(control) || control)?.getBoundingClientRect();
-    const expandedPortals = control?.getAttribute("aria-expanded") === "true" && anchor ? openDropdowns().filter(popup => {
+    const anchor = (root || control)?.getBoundingClientRect();
+    const expanded = control?.getAttribute("aria-expanded") === "true" || /(?:^|[\s_-])expand(?:ed)?(?:$|[\s_-])/.test(String(root?.className || ""));
+    const global = includeGlobal || expanded ? openDropdowns() : [];
+    const expandedPortals = expanded && anchor ? global.filter(popup => {
       const rect = popup.getBoundingClientRect();
-      return Math.abs(rect.left - anchor.left) < 3 && Math.abs(rect.top - anchor.bottom) < 40;
+      return Math.abs(rect.left - anchor.left) < 3 && Math.min(Math.abs(rect.top - anchor.bottom), Math.abs(rect.bottom - anchor.top)) < 40;
     }) : [];
     const related = [...new Set(owned.length ? owned : local.length ? local : expandedPortals.length === 1 ? expandedPortals : [])];
-    return includeGlobal ? [...new Set([...related, ...openDropdowns()])] : related;
+    return includeGlobal ? [...new Set([...related, ...global])] : related;
   };
-  const openChoice = async (control) => {
+  const nearbyPopup = (control) => {
+    const anchor = (choiceRoot(control) || control)?.getBoundingClientRect?.();
+    if (!anchor) return null;
+    const distance = (popup) => {
+      const rect = popup.getBoundingClientRect();
+      return Math.abs(rect.left - anchor.left) + Math.abs(rect.top - anchor.bottom);
+    };
+    return [...document.querySelectorAll(popupSelector)].filter((popup) => {
+      const className = String(popup.className || "");
+      const hasOptions = popupOptionNodes(popup).length > 0;
+      if (popup === control || popup.contains(control) || control?.contains?.(popup) || !isPopup(popup) || !visible(popup) || popup.closest('[aria-hidden="true"], [hidden], [inert]')
+        || !hasOptions && !(/popup|dropdown|popover|options|listbox/i.test(className) && clean(popup.innerText || popup.textContent))) return false;
+      const style = getComputedStyle(popup);
+      const rect = popup.getBoundingClientRect();
+      return (style.position === "fixed" || style.position === "absolute") && rect.width > 30 && rect.height > 18 && rect.height < 700 && distance(popup) < 1000;
+    }).sort((left, right) => distance(left) - distance(right)
+      || left.getBoundingClientRect().width * left.getBoundingClientRect().height - right.getBoundingClientRect().width * right.getBoundingClientRect().height)[0] || null;
+  };
+  const openChoice = async (control, searchValue) => {
+    const trigger = choiceTrigger(control);
     const trace = lastOpening = { focused: document.hasFocus(), alreadyActive: document.activeElement === control, activation: "focus" };
-    const activationControl = control.closest?.("[class*='select-multiple'], [class*='select--multi'], [class*='Select--multi']") ? choiceRoot(control) || control : control;
     const signature = (popup) => { const rect = popup.getBoundingClientRect(), fixed = getComputedStyle(popup).position === "fixed"; return [Math.round(rect.left + (fixed ? 0 : scrollX)), Math.round(rect.top + (fixed ? 0 : scrollY)), clean(popup.textContent)].join("\u0001"); };
     const previous = new Map(openDropdowns().map(popup => [popup, signature(popup)]));
-    const opened = () => [...new Set([...popupFor(control, false), ...openDropdowns().filter(popup => !previous.has(popup) || previous.get(popup) !== signature(popup))])][0];
+    const opened = (activationControl) => {
+      const anchor = activationControl.getBoundingClientRect();
+      const nearby = nearbyPopup(control);
+      const freshNearby = nearby && (!previous.has(nearby) || previous.get(nearby) !== signature(nearby)) ? nearby : null;
+      const related = popupFor(control, false);
+      return [...new Set(related.length ? related : [...openDropdowns().filter(popup => !previous.has(popup) || previous.get(popup) !== signature(popup)), freshNearby])].filter(popup => popup && !popup.contains(control))
+        .sort((left, right) => {
+          const distance = (popup) => { const rect = popup.getBoundingClientRect(); return Math.abs(rect.left - anchor.left) + Math.abs(rect.top - anchor.bottom); };
+          return distance(left) - distance(right);
+        })[0];
+    };
+    const expanded = () => control.getAttribute("aria-expanded") === "true" || /(?:^|[\s_-])expand(?:ed)?(?:$|[\s_-])/.test(String(choiceRoot(control)?.className || ""));
+    const readyPopup = (activationControl) => {
+      const popup = opened(activationControl);
+      const loading = [...(popup?.querySelectorAll?.('[aria-busy=true], [loading-number], [class*=loading]') || [])].some(node => visible(node)
+        && (node.getAttribute("aria-busy") === "true" || Number(node.getAttribute("loading-number")) > 0 || /(?:loading-loading|mask|spinner|rotate)/i.test(String(node.className))));
+      return popup && (popupOptionNodes(popup).length || loading || /^(?:请输入|请选择|暂无(?:数据|选项)?|未查询到(?:备选项|候选项)|无匹配数据|加载中)/.test(clean(popup.textContent))) ? popup : null;
+    };
     if (!document.hasFocus()) globalThis.focus?.();
     control.focus?.();
-    if (!await waitFor(() => opened() || control.getAttribute("aria-expanded") === "true" || /(?:^|[\s_-])expand(?:ed)?(?:$|[\s_-])/.test(String(choiceRoot(control)?.className || "")), 160)) {
-      trace.activation = "synthetic";
-      await clickOption(activationControl);
+    let popup = await waitFor(() => readyPopup(control), 160);
+    if (!popup && searchValue != null && (isAutocompleteControl(control) || isSearchableChoiceInput(control)) && editableSearch(control)) {
+      const trusted = !!globalThis.chrome?.runtime?.sendMessage;
+      trace.activation = trusted ? "trusted-search-trigger" : "synthetic-search-trigger";
+      await clickOption(trigger, trusted, null, trace);
+      popup = await waitFor(() => readyPopup(trigger), 160);
+      if (!popup && trigger !== control && expanded()) popup = await waitFor(() => readyPopup(trigger), 1600);
+      if (!popup && trigger !== control && !isAutocompleteControl(control)) {
+        if (!opened(trigger)) await clickOption(control, trusted, null, trace);
+        popup = await waitFor(() => readyPopup(control), 160);
+      }
+      if (!popup) {
+        // A search-only portal can have zero height until a query is entered.
+        setSearchValue(control, searchValue);
+        trace.searched = true;
+        popup = await waitFor(() => readyPopup(trigger), 5000);
+      }
+      trace.popupFound = !!popup;
+      return popup;
     }
-    let popup = await waitFor(opened, 1600);
-    if (!popup && globalThis.chrome?.runtime?.sendMessage) {
-      // Side-panel focus and native-only handlers can ignore scripted activation.
-      // Reuse the existing trusted click, and wait without a second toggle.
-      trace.activation = "trusted-fallback";
-      control.blur?.();
-      await clickOption(activationControl, true, null, trace);
-      popup = await waitFor(opened, 1600);
+    if (!popup && (opened(control) || expanded())) popup = await waitFor(() => readyPopup(control), 1600);
+    if (!popup) {
+      const trusted = !!globalThis.chrome?.runtime?.sendMessage;
+      const activationControl = trigger;
+      trace.activation = trusted ? activationControl !== control ? "trusted-trigger-fallback" : "trusted-fallback" : activationControl !== control ? "synthetic-trigger" : "synthetic";
+      await clickOption(activationControl, trusted, null, trace);
+      popup = await waitFor(() => readyPopup(activationControl), trigger !== control ? 160 : 1600);
+      if (!popup && trigger !== control) {
+        if (expanded()) popup = await waitFor(() => readyPopup(control), 1600);
+        if (!popup && !opened(trigger)) await clickOption(control, trusted, null, trace);
+        if (!popup) popup = await waitFor(() => readyPopup(control), 1600);
+      }
+    }
+    if (!popup && trigger !== control) {
+      if (opened(control) || expanded()) popup = await waitFor(() => readyPopup(trigger), 5000);
+      if (!popup) {
+        const trusted = !!globalThis.chrome?.runtime?.sendMessage;
+        trace.activation = trusted ? "trusted-trigger-fallback" : "synthetic-trigger";
+        await clickOption(trigger, trusted, null, trace);
+        popup = await waitFor(() => readyPopup(trigger), 5000);
+      }
     }
     trace.popupFound = !!popup;
     return popup;
-  };
-  const popupIsOpen = (control) => {
-    if (openDropdowns().length || control?.getAttribute?.("aria-expanded") === "true") return true;
-    const anchor = control?.getBoundingClientRect?.();
-    return !!anchor && [...document.querySelectorAll("body *")].some((el) => {
-      if (el === control || control?.contains?.(el) || !visible(el) || el.children.length < 2) return false;
-      const style = getComputedStyle(el); const rect = el.getBoundingClientRect();
-      return (style.position === "fixed" || style.position === "absolute") && rect.width > 100 && rect.height > 30 && rect.height < 700
-        && Math.abs(rect.left - anchor.left) < 600 && Math.abs(rect.top - anchor.bottom) < 700;
-    });
   };
   const dismissDropdowns = async (control, toggle = false) => {
     await wait(60);
@@ -825,11 +988,19 @@
     if (toggle && ownPopupOpen && isChoiceControl(control) && !control.matches('input[type=checkbox], input[type=radio], [role=checkbox], [role=radio]') && control?.click) { control.click(); await wait(60); }
   };
   const closeVisibleDropdowns = async (control) => {
+    const closing = [...new Set([...popupFor(control, false),
+      ...(lastOpenedControl === control && lastOpenedPopup && isPopup(lastOpenedPopup) ? [lastOpenedPopup] : []), nearbyPopup(control)])].filter(Boolean);
     await dismissDropdowns(control, true);
     if (openDropdowns().length) {
       const event = new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true });
       [document.activeElement, document, window].filter(Boolean).forEach((node) => node.dispatchEvent?.(event));
     }
+    // Some cart menus ignore Escape. Cancel only inside the captured popup.
+    for (const popup of closing.filter(node => node.isConnected && visible(node))) {
+      const cancel = confirmationButton(popup, "取消");
+      if (cancel) await clickOption(cancel, true, () => !visible(popup), null, true);
+    }
+    await waitFor(() => closing.every(popup => !popup.isConnected || !visible(popup)), 800);
     if (lastOpenedControl === control) lastOpenedPopup = null;
   };
   const closeDatePicker = async (calendar, control) => {
@@ -840,11 +1011,15 @@
     input?.blur?.();
     await closeVisibleDropdowns(control);
   };
-  const popupOptionNodes = (scope) => {
+  const popupOptionNodes = (scope, deduplicate = true) => {
     const selector = "[role=option], li, [data-value], [class*='option'], [class*='Option'], [class*='item'], [class*='Item']";
     const text = (node) => clean(node.textContent || node.getAttribute("data-value") || node.getAttribute("value"));
     const action = (node) => node.matches?.("button, [role=button], [data-confirm], [data-confirm] *, [class*='button'], [class*='Button'], [class*='btn'], [class*='Btn']") || /^(?:确定|取消)$/.test(text(node));
-    const candidates = [...(scope?.querySelectorAll(selector) || [])].filter((node) => !action(node) && visible(node) && !/empty|loading|hint|placeholder/i.test(String(node.className)) && !/^(?:请输入|请选择|暂无(?:数据|选项)?|无匹配数据|加载中)[….]?$/.test(text(node)));
+    const candidates = [...new Set([...(scope?.querySelectorAll(selector) || [])].map(node => {
+      const row = node.closest("[class*='list-item-container'], [class*='List-item-container']");
+      // Search highlighting and category breadcrumbs are not separate choices.
+      return row?.querySelector("[class*='item-text-label'], [class*='Item-text-label']") || node;
+    }))].filter((node) => !node.matches('input, textarea, select') && !action(node) && visible(node) && !/empty|loading|hint|placeholder/i.test(String(node.className)) && !(/highlight/i.test(String(node.className)) && node.parentElement?.closest(selector) && scope.contains(node.parentElement.closest(selector))) && !/^(?:请输入|请选择|暂无(?:数据|选项)?|未查询到(?:备选项|候选项)|无匹配数据|加载中)[….]?$/.test(text(node)));
     const candidateSet = new Set(candidates);
     const candidateText = new Map(candidates.map((node) => [node, text(node)]));
     const aggregate = new Set();
@@ -859,12 +1034,12 @@
     // can turn a parent container into a fake “province + city” candidate.
     const leaves = semantic.length ? [] : [...(scope?.querySelectorAll("*") || [])].filter((node) => {
       const value = text(node);
-      return value && value.length <= 80 && !action(node) && ![...node.children].some((child) => visible(child) && text(child) === value);
+      return value && value.length <= 80 && !node.matches('input, textarea, select') && !action(node) && ![...node.children].some((child) => visible(child) && text(child) === value);
     });
     const seen = new Set();
     return (semantic.length ? semantic : leaves).filter(visible).filter((node) => {
       const value = text(node);
-      if (!value || /empty|loading|hint|placeholder/i.test(String(node.className)) || /^(?:请输入|请选择|暂无(?:数据|选项)?|无匹配数据|加载中)[….]?$/.test(value) || seen.has(value)) return false;
+      if (!value || /empty|loading|hint|placeholder/i.test(String(node.className)) || /^(?:请输入|请选择|暂无(?:数据|选项)?|未查询到(?:备选项|候选项)|无匹配数据|加载中)[….]?$/.test(value) || deduplicate && seen.has(value)) return false;
       seen.add(value);
       return true;
     });
@@ -875,12 +1050,12 @@
       .filter((text) => text && !/^请选择$|^暂无选项$/.test(text));
     if (!popup) return { texts: [], hasSearch: false, scrolled: false };
     const found = new Set(texts());
-    const hasSearch = !![...popup.querySelectorAll("input:not([type=hidden]), textarea")].find((el) => visible(el) && !el.readOnly);
+    const hasSearch = [...popup.querySelectorAll(searchInputSelector)].some(editableSearch);
     let scrolled = false;
     const scroller = [...(popup?.querySelectorAll("*") || [])]
       .filter((el) => el.clientHeight >= 40 && el.scrollHeight > el.clientHeight + 2)
       .sort((a, b) => b.clientHeight - a.clientHeight)[0];
-    if (scan && scroller) {
+    if (scan && scroller && found.size < 80) {
       const originalTop = scroller.scrollTop;
       // ponytail: cap portal scans; raise only for controls with over 80 meaningful choices.
       for (let pass = 0; pass < 12; pass++) {
@@ -902,7 +1077,7 @@
   const waitForOptions = async (popup) => {
     if (!popup) return false;
     const loading = () => [...popup.querySelectorAll('[aria-busy=true], [loading-number], [class*=loading]')].some(node => visible(node) && (node.getAttribute('aria-busy') === 'true' || Number(node.getAttribute('loading-number')) > 0 || /(?:loading-loading|mask|spinner|rotate)/i.test(String(node.className))));
-    const ready = () => !loading() && (popupOptionNodes(popup).length || /^(?:请输入|请选择|暂无(?:数据|选项)?|无匹配数据)/.test(clean(popup.textContent)));
+    const ready = () => !loading() && (popupOptionNodes(popup).length || /^(?:请输入|请选择|暂无(?:数据|选项)?|未查询到(?:备选项|候选项)|无匹配数据)/.test(clean(popup.textContent)));
     await waitFor(() => loading() || ready(), 1600);
     return loading() ? waitFor(ready, 5000) : ready();
   };
@@ -914,9 +1089,17 @@
       if (!descriptor) continue;
       if (wanted.size && !wanted.has(descriptor.key)) continue;
       const control = resolveField(descriptor.key);
-      if (!control || controlValue(control) || !isChoiceControl(control)) continue;
+      if (!control || controlValue(control) || !(isChoiceControl(control) || isAutocompleteControl(control))) continue;
       if (/radio|checkbox/.test(descriptor.type || "")) {
-      descriptor.options = [...(fieldContainer(control)?.querySelectorAll("input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]") || [])]
+        if (control.matches(".phoenix-radio-group")) {
+          descriptor.options = [...new Set([...control.querySelectorAll(".phoenix-radio")]
+            .filter(el => visible(el) && !el.matches(".phoenix-radio--disabled, [aria-disabled=true]"))
+            .map(el => clean(el.textContent)).filter(Boolean))];
+          descriptor.optionSource = "radio";
+          descriptor.optionCount = descriptor.options.length;
+          continue;
+        }
+        descriptor.options = [...(fieldContainer(control)?.querySelectorAll("input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]") || [])]
           .map((item) => clean(associatedLabels(item).at(-1) || item.value)).filter(Boolean).filter((text, index, all) => all.indexOf(text) === index);
         descriptor.optionSource = "radio";
         descriptor.optionCount = descriptor.options.length;
@@ -925,6 +1108,9 @@
       if (/日期|时间|年月|date|month/i.test(`${descriptor.type || ""} ${descriptor.label || ""} ${descriptor.ariaLabel || ""} ${descriptor.placeholder || ""}`)) { descriptor.optionSource = "date-deferred"; continue; }
       const known = optionTexts(control);
       if (control.tagName === "SELECT") { descriptor.options = known; descriptor.optionSource = "native"; descriptor.optionCount = known.length; continue; }
+      // An unconfirmed query can hide every option; it is not a selected value.
+      const pendingQuery = editableSearch(control) && pendingSuggestions.has(control) ? control.value : "";
+      if (pendingQuery) setSearchValue(control, "");
       if (lastOpenedControl && lastOpenedControl !== control) await closeVisibleDropdowns(lastOpenedControl);
       const nearestPopup = () => {
         const rect = control.getBoundingClientRect();
@@ -961,10 +1147,14 @@
       descriptor.hasSearch = popupDetails.hasSearch || control.tagName === "INPUT" && !control.readOnly;
       descriptor.candidatesTruncated = descriptor.options.length >= 80;
       descriptor.hasConfirmation = !!confirmationFor(selectedPopup, control);
-      descriptor.isMultiSelector = /(?:已选(?:地区)?\s*\d+\s*\/|清空已选)/.test(clean(selectedPopup?.innerText || selectedPopup?.textContent))
-        || !!control.closest?.(".phoenix-select--multi, [class*='select-multiple'], [class*='select--multi'], [class*='Select--multi']");
+      const cartText = clean(selectedPopup?.innerText || selectedPopup?.textContent);
+      descriptor.isMultiSelector = !/已选(?:地区)?\s*\d+\s*\/\s*1(?!\d)/.test(cartText)
+        && (isMultipleChoice(control, selectedPopup) || /(?:已选(?:地区)?\s*\d+\s*\/|清空已选)/.test(cartText));
       descriptor.scrolled = popupDetails.scrolled;
-      if (!keepOpen) { await closeVisibleDropdowns(control); lastOpenedControl = null; }
+      if (!keepOpen) {
+        if (pendingQuery) restoreChoiceSearch(control, pendingQuery);
+        await closeVisibleDropdowns(control); lastOpenedControl = null;
+      }
     }
     return schema;
   }
@@ -1000,41 +1190,62 @@
     return marker > 0 ? { summary: text.slice(0, marker).trim(), responsibilities: text.slice(marker).trim() } : { summary: text, responsibilities: "" };
   };
   const clickOption = async (el, trusted = false, changed, record, plainTrusted = false) => {
-    if (!el) return false;
-    if (trusted && globalThis.chrome?.runtime?.sendMessage) {
-      const hitTarget = () => {
+    if (!el || uploadControl(el)) { if (record) record.blocked = "upload-control"; return false; }
+    const panel = document.getElementById("resume-autofill-page-action");
+    const pointerEvents = panel?.style.pointerEvents;
+    // Our review overlay must not intercept native clicks on page controls.
+    if (panel) panel.style.pointerEvents = "none";
+    try {
+      if (trusted && globalThis.chrome?.runtime?.sendMessage) {
+        const hitPoint = () => {
+          const rect = el.getBoundingClientRect();
+          for (const fraction of [0.5, 0.2, 0.8]) {
+            const point = { x: rect.left + rect.width * fraction, y: rect.top + rect.height / 2 };
+            const hit = document.elementFromPoint(point.x, point.y);
+            if (hit && (hit === el || el.contains(hit))) return point;
+          }
+          return null;
+        };
+        // Portals realign after focus/scroll; scrolling a stale option moves its anchor again.
+        if (!hitPoint() && !await waitFor(hitPoint, 350)) {
+          el.scrollIntoView?.({ behavior: "instant", block: "center", inline: "nearest" });
+          await wait(80);
+          await waitFor(hitPoint, 800);
+        }
         const rect = el.getBoundingClientRect();
-        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        return hit && (hit === el || el.contains(hit));
-      };
-      if (!hitTarget()) {
-        el.scrollIntoView?.({ behavior: "instant", block: "nearest", inline: "nearest" });
-        await wait(80);
+        if (record) record.rect = { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
+        let delivered = false;
+        const observe = event => { if (event.target === el || el.contains(event.target)) delivered = true; };
+        document.addEventListener("click", observe, true);
+        try {
+          const point = hitPoint();
+          const result = point ? await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_TRUSTED_CLICK", ...point, plain: plainTrusted }) : { clicked: false, reason: "target-not-at-point" };
+          if (record) record.trusted = result?.clicked === true;
+          if (record && result?.reason) record.trustedError = result.reason;
+          if (result?.clicked && (changed ? await waitFor(changed, 800) : delivered)) return true;
+          if (result?.clicked && !delivered && record) { record.trusted = false; record.trustedError = "trusted-click-not-observed"; }
+        } catch (error) { if (record) record.trustedError = String(error?.message || error); }
+        finally { document.removeEventListener("click", observe, true); }
       }
+      if (record) record.fallback = true;
       const rect = el.getBoundingClientRect();
-      if (record) record.rect = { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
-      try {
-        const result = hitTarget() ? await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_TRUSTED_CLICK", x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, plain: plainTrusted }) : { clicked: false, reason: "target-not-at-point" };
-        if (record) record.trusted = result?.clicked === true;
-        if (record && result?.reason) record.trustedError = result.reason;
-        if (result?.clicked && (!changed || await waitFor(changed, 800))) return true;
-      } catch (error) { if (record) record.trustedError = String(error?.message || error); }
-    }
-    if (record) record.fallback = true;
-    const rect = el.getBoundingClientRect();
-    const point = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0 };
-    const event = (type) => typeof PointerEvent === "function" && type.startsWith("pointer")
-      ? new PointerEvent(type, { ...point, buttons: type.endsWith("down") ? 1 : 0, pointerId: 1, pointerType: "mouse", isPrimary: true })
-      : new MouseEvent(type, { ...point, buttons: type.endsWith("down") ? 1 : 0 });
-    // Phoenix's area rows bind selection on pointer-down; HTMLElement.click()
-    // skips that phase and leaves the confirm button with no pending choice.
-    ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((type) => el.dispatchEvent(event(type)));
-    if (typeof el.click === "function") el.click();
-    else el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    return true;
+      const point = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0 };
+      const event = (type) => typeof PointerEvent === "function" && type.startsWith("pointer")
+        ? new PointerEvent(type, { ...point, buttons: type.endsWith("down") ? 1 : 0, pointerId: 1, pointerType: "mouse", isPrimary: true })
+        : new MouseEvent(type, { ...point, buttons: type.endsWith("down") ? 1 : 0 });
+      // Phoenix's area rows bind selection on pointer-down; HTMLElement.click()
+      // skips that phase and leaves the confirm button with no pending choice.
+      ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((type) => el.dispatchEvent(event(type)));
+      if (typeof el.click === "function") el.click();
+      else el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return true;
+    } finally { if (panel) panel.style.pointerEvents = pointerEvents; }
   };
   const selectionTarget = (option) => {
-    const treeNode = option?.closest?.("[role=treeitem], [class*='tree__node'], [class*='tree-node'], [class*='TreeNode']");
+    let treeNode = option?.closest?.("[role=treeitem], [class*='tree__node'], [class*='tree-node'], [class*='TreeNode']")
+      || (option?.parentElement?.matches?.("[role=treeitem], [class*='tree__node'], [class*='tree-node'], [class*='TreeNode']") ? option.parentElement : null);
+    while (treeNode && !treeNode.querySelector('input[type=checkbox], [role=checkbox]'))
+      treeNode = treeNode.parentElement?.closest("[role=treeitem], [class*='tree__node'], [class*='tree-node'], [class*='TreeNode']");
     const treeCheckbox = treeNode?.querySelector("input[type=checkbox], [role=checkbox]");
     if (treeCheckbox) return treeCheckbox;
     const menuItem = option?.matches?.("[class*='Menu-container'], [class*='menu-container']") ? option
@@ -1076,10 +1287,10 @@
     };
   };
   const logChoice = (stage, trace) => console.info("[resume-autofill][choice]", { stage, confirmed: !!trace?.confirmed, failure: trace?.failure || "" });
-  const confirmationButton = (scope) => {
+  const confirmationButton = (scope, caption = "确定") => {
     const nodes = [...(scope?.querySelectorAll("button, [role=button], [data-confirm], [class*='button'], [class*='Button'], [class*='btn'], [class*='Btn']") || [])];
-    const leaf = nodes.find((el) => visible(el) && normalize(el.textContent) === "确定" && ![...el.children].some((child) => visible(child) && normalize(child.textContent) === "确定"))
-      || [...(scope?.querySelectorAll("*") || [])].find((el) => visible(el) && normalize(el.textContent) === "确定" && ![...el.children].some((child) => visible(child) && normalize(child.textContent) === "确定"));
+    const leaf = nodes.find((el) => visible(el) && normalize(el.textContent) === caption && ![...el.children].some((child) => visible(child) && normalize(child.textContent) === caption))
+      || [...(scope?.querySelectorAll("*") || [])].find((el) => visible(el) && normalize(el.textContent) === caption && ![...el.children].some((child) => visible(child) && normalize(child.textContent) === caption));
     // Phoenix rerenders its footer after a multi-value click. Its handler is
     // on the button root rather than its transient text/container node.
     return leaf?.closest?.(".phoenix-button") || leaf || null;
@@ -1089,12 +1300,16 @@
     for (let node = popup; node && !seen.has(node); node = node.parentElement) { scopes.push(node); seen.add(node); if (node === document.body) break; }
     for (let node = control; node && !seen.has(node); node = node.parentElement) { scopes.push(node); seen.add(node); if (node === document.body) break; }
     const anchor = (popup || control)?.getBoundingClientRect?.();
-    return scopes.map(confirmationButton).filter(Boolean).sort((a, b) => {
+    return scopes.map(scope => confirmationButton(scope)).filter(Boolean).sort((a, b) => {
       const distance = (el) => !anchor ? 0 : Math.abs(el.getBoundingClientRect().left - anchor.left) + Math.abs(el.getBoundingClientRect().top - anchor.top);
       return distance(a) - distance(b);
     })[0] || null;
   };
+  const pendingSuggestions = new WeakSet();
+  const searchInputSelector = 'input:not([type]), input[type=text], input[type=search], textarea';
+  const editableSearch = el => !!el?.matches?.(searchInputSelector) && visible(el) && !el.readOnly;
   const setSearchValue = (el, value) => {
+    if (isAutocompleteControl(el)) pendingSuggestions.add(el);
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     setter ? setter.call(el, String(value)) : (el.value = String(value));
     el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1112,16 +1327,31 @@
       return text === wanted || text.includes(wanted) || wanted.includes(text);
     });
   };
+  const nearbySuggestionPopup = (control, value) => {
+    const anchor = (choiceRoot(control) || control)?.getBoundingClientRect?.();
+    if (!anchor) return null;
+    return [...document.querySelectorAll("body *")].filter((popup) => {
+      if (popup === control || popup.contains(control) || !visible(popup) || popup.closest('[aria-hidden="true"], [hidden], [inert]')) return false;
+      const style = getComputedStyle(popup), rect = popup.getBoundingClientRect();
+      return ["fixed", "absolute"].includes(style.position) && rect.width >= 80 && rect.height >= 24 && rect.height <= 700
+        && rect.right >= anchor.left - 80 && rect.left <= anchor.right + 80
+        && rect.bottom >= anchor.top - 360 && rect.top <= anchor.bottom + 500
+        && popupMatchesValue(popup, value);
+    }).sort((a, b) => popupOptionNodes(b).length - popupOptionNodes(a).length
+      || Math.abs(a.getBoundingClientRect().top - anchor.bottom) - Math.abs(b.getBoundingClientRect().top - anchor.bottom))[0] || null;
+  };
   const mayReopenSuggestions = (el) => el?.tagName === "INPUT" && !el.readOnly
     && (isSuggestionControl(el) || /(?:^|[-_])(?:input|field|control)(?:$|[-_])/i.test(`${el.className} ${el.parentElement?.className || ""}`));
   async function writeAndObserveSuggestion(label, value, target, chooseOptions = {}) {
+    if (isAutocompleteControl(target)) return choose(label, value, target, false, chooseOptions);
     const before = new Set(openDropdowns());
     target.focus?.();
     if (!setValue(target, value, true)) return false;
     // An autocomplete may reuse a popup that was already open before typing.
     const popup = await waitFor(() => popupFor(target, false).find((candidate) => popupMatchesValue(candidate, value))
-      || openDropdowns().find((candidate) => !before.has(candidate) && popupMatchesValue(candidate, value)), isAutocompleteControl(target) ? 800 : 180);
-    if (!popup && !isAutocompleteControl(target)) {
+      || openDropdowns().find((candidate) => !before.has(candidate) && popupMatchesValue(candidate, value))
+      || nearbySuggestionPopup(target, value), 180);
+    if (!popup) {
       target.dispatchEvent(new Event("change", { bubbles: true }));
       target.dispatchEvent(new Event("blur", { bubbles: true }));
       return true;
@@ -1138,16 +1368,17 @@
     const dateParts = dateControls(el);
     return JSON.stringify([moduleTitle(el), identityLabel(el), controlType(el), el.name || "", el.id || "", el.autocomplete || "", dateParts.length >= 2 ? dateParts.indexOf(el) : -1]);
   };
-  function rememberField(el, controls = fields()) {
+  function rememberField(el, controls) {
     const existing = elementKeys.get(el);
     if (existing && fieldHandles.has(existing)) return existing;
+    controls ||= fields();
     // ponytail: keep handles only for this document, bounded to 2000 controls.
     if (fieldHandles.size >= 2000) fieldHandles.delete(fieldHandles.keys().next().value);
     const key = `${scanId}:${++fieldSequence}`;
     const label = identityLabel(el);
     const module = moduleTitle(el);
     const repeated = hasKnownSection(module) || controls.filter((other) => moduleTitle(other) === module && identityLabel(other) === label).length > 1;
-    fieldHandles.set(key, { el, identity: fieldIdentity(el), row: repeated ? repeatedContainer(el, label) : null });
+    fieldHandles.set(key, { el, identity: fieldIdentity(el), label, module, root: choiceRoot(el), row: repeated ? repeatedContainer(el, label) : null });
     elementKeys.set(el, key);
     return key;
   }
@@ -1158,6 +1389,15 @@
     // A rebuilt/reordered repeated module has no proven row identity. Never
     // migrate an old handle to a row that happens to occupy the same index.
     if (saved.row && !saved.row.isConnected) return null;
+    // A selected control may remove its editing input. Keep only its original,
+    // still-connected root and row; never adopt a different field or module.
+    if (saved.root?.isConnected && !saved.root.querySelector(controlSelector) && editable(saved.root)
+      && identityLabel(saved.root) === saved.label && moduleTitle(saved.root) === saved.module) {
+      saved.el = saved.root;
+      saved.identity = fieldIdentity(saved.root);
+      elementKeys.set(saved.root, key);
+      return saved.root;
+    }
     const matches = fields().filter((el) => fieldIdentity(el) === saved.identity && (!saved.row || saved.row.contains(el)));
     if (matches.length !== 1) return null;
     saved.el = matches[0];
@@ -1165,9 +1405,13 @@
     return saved.el;
   }
   function formSchema() {
+    const previousControls = schemaControls;
+    // Only this synchronous scan shares a list; selections and later scans must rediscover controls.
+    schemaControls = fields();
+    try {
     // Disabled dependent inputs still belong to the form; never try to write them.
     const controls = [...new Set([...fields(), ...document.querySelectorAll("input:disabled, select:disabled, textarea:disabled, input[aria-disabled=true]")])]
-      .filter((el) => editable(el) || visible(el) && !["hidden", "password", "file"].includes(el.type) && !!fieldTitle(el));
+      .filter((el) => !uploadControl(el) && (editable(el) || visible(el) && !["hidden", "password", "file"].includes(el.type) && !!fieldTitle(el)));
     const moduleRows = new Map();
     for (const [key, saved] of fieldHandles) if (!saved.el.isConnected) resolveField(key);
     const metadata = controls.map((el, index) => {
@@ -1190,7 +1434,7 @@
         .map((id) => clean(document.getElementById(id)?.textContent).slice(0, 100)).slice(0, 3);
       const data = Object.fromEntries([...el.attributes].filter(({ name, value }) => /^data-(?:label|field|name|title|testid|field-key)$/.test(name)
         && value.length <= 80 && !/[a-f0-9]{16}|[a-z0-9_-]{40}/i.test(value)).map(({ name, value }) => [name, value]));
-      const anchor = /教育|学历/.test(module) ? "学校名称" : /工作|实习|任职/.test(module) ? "公司名称" : /项目/.test(module) ? "项目名称" : /证书|英语/.test(module) ? "证书名称" : /语言|外语/.test(module) ? "语言类型" : /获奖|奖励|竞赛|大赛|比赛|荣誉|奖学金/.test(module) ? "获奖项" : /技能|计算机能力/.test(module) ? "技能名称" : /干部|社团|校园经历/.test(module) ? "职务" : "";
+      const anchor = /教育|学历/.test(module) ? "学校名称" : /工作|实习|任职/.test(module) ? "公司名称" : /项目/.test(module) ? "项目名称" : /证书|英语/.test(module) ? "证书名称" : /语言|外语/.test(module) ? "语言类型" : /获奖|奖励|竞赛|大赛|比赛|荣誉|奖学金/.test(module) ? "获奖项" : /技能|计算机能力/.test(module) ? "技能名称" : /干部|社团|校园经历|在校实践|校内实践/.test(module) ? "职务" : "";
       if (anchor && !moduleRows.has(module)) moduleRows.set(module, rowContainers(anchor, module));
       const rows = moduleRows.get(module) || [];
       const row = rows.find((container) => container.contains(el));
@@ -1199,9 +1443,14 @@
       const educationParent = /教育|学历/.test(module) && row && /学院|院系|专业/.test(label)
         ? metadata.filter((field) => row.contains(field.el) && (/专业/.test(label) ? /学院|院系/.test(field.label) : /学校|院校/.test(field.label))).at(-1)?.el : null;
       const gpaParent = row && anchorMatch(el, "GPA") ? metadata.find(field => row.contains(field.el) && /GPA.*(?:类型|BASE)|绩点.*(?:类型|满分|制式)|满绩/i.test(field.label))?.el : null;
-      const languageParent = /^(?:语言考试|语言水平|掌握程度|熟练程度|精通程度|等级自评|相关证书|语言证书|外语等级|考试分数)[＊*]?$/.test(label) ? metadata.filter(field => field.index < index && field.module === module
-        && (/语言考试|语言水平|掌握程度|熟练程度|精通程度|等级自评|相关证书|语言证书/.test(label) ? /^(?:语言类型|语言名称|语种)[＊*]?$/.test(field.label) : /^(?:语言考试|英语等级)[＊*]?$/.test(field.label))
-        && (row ? row.contains(field.el) : fieldContainer(field.el) === fieldContainer(el) || fieldContainer(field.el)?.parentElement === fieldContainer(el)?.parentElement || field.repeat === repeat)).at(-1)?.el : null;
+      const languageCategoryDetail = /语言考试|语言水平|掌握程度|熟练程度|精通程度|等级自评|相关证书|语言证书|听说|读写/.test(label);
+      const languagePeers = languageCategoryDetail || /外语等级|考试分数/.test(label) ? metadata.filter(field => field.index < index && field.module === module
+        && (row ? row.contains(field.el) : fieldContainer(field.el) === fieldContainer(el) || fieldContainer(field.el)?.parentElement === fieldContainer(el)?.parentElement || field.repeat === repeat)) : [];
+      const languageCategory = languagePeers.filter(field => /^(?:语言类型|语言类别|外语类别|语言名称|语种)[＊*]?$/.test(field.label)).at(-1)?.el;
+      const languageParent = (/^(?:语言考试|语言水平|掌握程度|熟练程度|精通程度|等级自评|相关证书|语言证书|外语等级|考试分数|听说(?:能力|水平)?|读写(?:能力|水平)?)[＊*]?$/.test(label)
+        || languageCategoryDetail && anchor === "语言类型")
+        ? languageCategoryDetail && anchor === "语言类型" && row && anchorField ? anchorField : languageCategoryDetail ? languageCategory
+          : languagePeers.filter(field => /^(?:语言考试|英语等级)[＊*]?$/.test(field.label)).at(-1)?.el : null;
       const parentChoice = educationParent || gpaParent || languageParent || (isChoiceControl(el) && /名称/.test(label) && row
         ? metadata.filter((field) => field.index < index && row.contains(field.el) && isChoiceControl(field.el) && /类型|类别/.test(field.label)).at(-1)?.el : null);
       return {
@@ -1217,16 +1466,28 @@
         constraints: { maxLength: el.maxLength >= 0 ? el.maxLength : undefined, pattern: el.pattern || "", min: el.min || "", max: el.max || "", step: el.step || "" },
         gpaScaleValue: row && /GPA|绩点/i.test(label) ? controlValue([...row.querySelectorAll(controlSelector)].find(control => /GPA.*(?:类型|BASE)|绩点.*(?:类型|满分|制式)|满绩/i.test(fieldTitle(control)))) : "",
         examValue: /外语等级|考试分数/.test(label) ? controlValue(languageParent) : "",
-        languageValue: /语言考试|相关证书|语言证书/.test(label) ? controlValue(languageParent) : "",
+        languageValue: languageParent ? controlValue(/外语等级|考试分数/.test(label) ? languageCategory : languageParent) : "",
         examScoreValue: /语言考试|英语等级/.test(label) ? controlValue(metadata.find(field => /考试分数/.test(field.label) && (row ? row.contains(field.el) : fieldContainer(field.el) === fieldContainer(el) || field.module === module && field.repeat === repeat))?.el) : "",
         narrative: el.tagName === "TEXTAREA" && !!anchor && !anchorField,
         dependsOn: parentChoice ? rememberField(parentChoice, controls) : "",
-        rowAnchor: anchorField ? { label: anchor, value: controlValue(anchorField) } : null,
+        rowAnchor: anchorField ? { label: anchor, value: controlValue(anchorField), choice: isChoiceControl(anchorField) } : null,
+        rowAnchors: rows.map(container => controlValue([...container.querySelectorAll(controlSelector)].find(control => anchorMatch(control, anchor)))),
+        rowDescriptions: /^(?:证书名称|获奖项)$/.test(anchor) ? rows.map(rowDescription) : [],
         module, repeatIndex: row ? rows.indexOf(row) : repeat, occurrence, currentValue: controlValue(el),
         type: controlType(el), options: optionTexts(el)
       };
     });
+    } finally { schemaControls = previousControls; }
   }
+
+  const matchReviewField = (schema, locator) => {
+    if (!locator || typeof locator.label !== "string" || !Number.isInteger(locator.row) || locator.row < 0) return null;
+    const label = normalize(locator.label.replace(/[＊*]/g, ""));
+    const module = normalize(locator.module || "");
+    const matches = (schema || []).filter((field) => normalize(String(field.label || "").replace(/[＊*]/g, "")) === label
+      && (!module || normalize(field.module || "") === module) && field.repeatIndex === locator.row);
+    return matches.length === 1 ? matches[0] : null;
+  };
 
   async function applyAssignments(assignments) {
     let filled = 0;
@@ -1237,7 +1498,7 @@
       if (!el || !assignment.value) { diagnostics.push({ ...detail, stage: "scan", reason: "field-not-found" }); continue; }
       if (controlValue(el) && !(mayReopenSuggestions(el) && normalize(controlValue(el)) === normalize(assignment.value))) { diagnostics.push({ ...detail, reason: "page-value-protected" }); continue; }
       if (!Number.isFinite(Number(assignment.confidence)) || Number(assignment.confidence) < 0.65 && !isChoiceControl(el)) { diagnostics.push({ ...detail, reason: "low-confidence" }); continue; }
-      const targetLabel = identityLabel(el);
+      const targetLabel = assignment.label || identityLabel(el);
       // Guard the common AI failure: dates/scores must not land in free-text descriptions.
       if (isDescription(targetLabel) && looksLikeDate(assignment.value)) { diagnostics.push({ ...detail, reason: "description-date-protected" }); continue; }
       if (looksLikeDate(assignment.value) && !/(日期|时间|年月)/.test(normalize(targetLabel))) { diagnostics.push({ ...detail, reason: "date-field-mismatch" }); continue; }
@@ -1311,9 +1572,15 @@
       return actual[0] === year && actual[1] === month;
     }
     if (index >= 0) {
+      const actual = dateParts(controlValue(target));
+      if (actual.length >= 2) {
+        return actual[0] === year && actual[1] === month && (!day || !actual[2] || actual[2] === day);
+      }
       const first = index - index % 2;
-      return Number(String(controlValue(controls[first])).replace(/\D/g, "")) === Number(year)
-        && Number(String(controlValue(controls[first + 1])).replace(/\D/g, "")) === Number(month);
+      const start = Number(String(controlValue(controls[first])).replace(/\D/g, ""));
+      const end = Number(String(controlValue(controls[first + 1])).replace(/\D/g, ""));
+      // Year/month hints can disappear after selection or rerender; verify both displayed parts.
+      return start === Number(year) && end === Number(month);
     }
     const actual = dateParts(controlValue(target));
     return actual[0] === year && actual[1] === month && (!day || !actual[2] || actual[2] === day);
@@ -1336,12 +1603,29 @@
       }
     };
     if (!value) { trace.failure = "empty-value"; return false; }
+    if (target?.matches(".phoenix-radio-group")) {
+      const options = [...target.querySelectorAll(".phoenix-radio")]
+        .filter(el => visible(el) && !el.matches(".phoenix-radio--disabled, [aria-disabled=true]"));
+      const matches = options.filter(el => normalize(el.textContent) === normalize(value));
+      trace.path = "radio-group";
+      trace.candidates = options.map(el => clean(el.textContent));
+      if (matches.length !== 1) { trace.failure = "radio-option-not-found"; return false; }
+      const key = rememberField(target);
+      await clickOption(matches[0]);
+      trace.confirmed = !!await waitFor(() => normalize(controlValue(resolveField(key))) === normalize(value), 800);
+      if (!trace.confirmed) trace.failure = "radio-value-not-confirmed";
+      return trace.confirmed;
+    }
     if (target?.tagName === "SELECT") {
       trace.path = "native-select";
-      const educationType = /学历类型|受教育类型|培养方式/.test(label) && [...target.options].find((option) =>
+      const educationOptions = /学历类型|受教育类型|培养方式|学习形式|学习方式|就读方式/.test(label) && /全日制|统招|非统招|自学考试/.test(value)
+        ? [...target.options].filter(option => !option.disabled && !option.closest("optgroup[disabled]")) : [];
+      const exactEducation = educationOptions.find(option => normalize(option.text) === normalize(value));
+      const educationType = exactEducation || educationOptions.filter((option) =>
         /是否全日制/.test(fieldTitle(target)) ? /非全日制/.test(value) ? option.text === "否" : /全日制|统招/.test(value) && option.text === "是"
-          : /非全日制/.test(value) ? /非全日制/.test(option.text) : /全日制|统招/.test(value) ? /全日制/.test(option.text) && !/非全日制/.test(option.text) : false)?.value;
-      trace.confirmed = setValue(target, educationType || value);
+          : /非全日制/.test(value) ? /非全日制/.test(option.text) : /非统招/.test(value) ? /非统招/.test(option.text) : /自学考试/.test(value) ? /自学考试/.test(option.text) : /全日制|统招/.test(value) ? /全日制/.test(option.text) && !/非全日制/.test(option.text) : false)[0];
+      if (educationOptions.length && !educationType) { trace.failure = "education-type-not-confirmed"; return false; }
+      trace.confirmed = setValue(target, educationType?.value || value);
       if (!trace.confirmed) trace.failure = "native-select-no-match";
       return trace.confirmed;
     }
@@ -1408,6 +1692,7 @@
     const wantedForms = dateForms(matchValue).map(normalize);
     const areaName = (text) => normalize(text).replace(/(?:特别行政区|自治区|自治州|省|市|地区|盟|区|县)$/g, "");
     const sameArea = (left, right) => areaName(left) === areaName(right);
+    const locationName = (text) => areaName(String(text).replace(/(?:总部|分部|办事处)$/g, ""));
     const optionForms = [matchValue,
       /(?:获奖|奖项|奖励|大赛|比赛|竞赛)(?:级别|等级)/.test(label) && awardScope(value),
       /家庭|家乡|籍贯|居住地|户籍|户口|所在地点|所在地/.test(label) && String(value).replace(/[\/／]/g, "")
@@ -1426,10 +1711,12 @@
       const forms = [...wantedForms, ...optionForms];
       if (/(?:获奖|奖项|奖励|大赛|比赛|竞赛)(?:级别|等级)/.test(label)) return normalize(awardScope(text)) === normalize(awardScope(value));
       if (/薪|工资|待遇/.test(label)) return forms.some((form) => salaryToken(normalized) === salaryToken(form));
-      const educationTypeMatch = /学历类型|受教育类型|培养方式/.test(label)
+      if (isLocationLabel(label)) return locationName(text) === locationName(value);
+      if (isSchoolLabel(label)) return normalized === wanted;
+      const educationTypeMatch = /学历类型|受教育类型|培养方式|学习形式|学习方式|就读方式/.test(label)
         && (/是否全日制/.test(fieldTitle(target)) ? /非全日制/.test(value) ? normalized === "否" : /全日制|统招/.test(value) && normalized === "是"
           : /非全日制/.test(value) ? /非全日制/.test(normalized) : /全日制|统招/.test(value) ? /全日制/.test(normalized) && !/非全日制/.test(normalized) : false);
-      if (/学历类型|受教育类型|培养方式/.test(label)) return educationTypeMatch;
+      if (/学历类型|受教育类型|培养方式|学习形式|学习方式|就读方式/.test(label)) return educationTypeMatch;
       return numericMonthMatch || forms.some((form) => normalized === form || normalized.includes(form) || form.includes(normalized));
     };
     if (year && month && /(日期|时间|年月)/.test(label)) {
@@ -1444,6 +1731,8 @@
         if (!chooseOptions.keepExistingCalendar) liveDateControl()?.scrollIntoView?.({ block: "center", inline: "nearest" });
         await wait(80);
         const dateInput = liveDateControl()?.matches?.("input") ? liveDateControl() : liveDateControl()?.querySelector?.("input");
+        const dateTrigger = () => dateInput?.matches?.(".phoenix-select__input--unText")
+          ? choiceRoot(liveDateControl()) || liveDateControl() : dateInput || liveDateControl();
         const priorDatePopups = new Set(openDropdowns());
         if (!document.hasFocus()) globalThis.focus?.();
         (dateInput || liveDateControl())?.focus?.({ preventScroll: true });
@@ -1464,9 +1753,10 @@
           || new Set(exactNodes(popup, /^(?:0?[1-9]|1[0-2])月$/).map(dateText)).size >= 6);
         // Focus can open the picker. Clicking again would close it and expose another field's portal.
         const focusOpened = calendarIsOpen() && popupRoots().some((popup) => !priorDatePopups.has(popup) || popupDistance(popup) < 48);
-        if (!focusOpened && !(chooseOptions.keepExistingCalendar && openDropdowns().some((popup) => popup.querySelector("table, [role=grid]")))) await clickOption(dateInput || liveDateControl());
+        if (!focusOpened && !(chooseOptions.keepExistingCalendar && openDropdowns().some((popup) => popup.querySelector("table, [role=grid]")))) await clickOption(dateTrigger());
         if (!await waitFor(calendarIsOpen, 1400)) {
-          await clickOption(dateInput || liveDateControl(), true, calendarIsOpen);
+          const alternateTrigger = dateInput && dateTrigger() !== dateInput ? dateInput : choiceRoot(liveDateControl()) || dateTrigger();
+          await clickOption(alternateTrigger, true, calendarIsOpen);
           await waitFor(calendarIsOpen, 1400);
         }
         const invalidYearList = () => popupRoots().some((popup) => {
@@ -1609,6 +1899,13 @@
           // visible start cell proves progress, but is not a confirmed value.
           trace.rangeStartPending = !trace.confirmed && chooseOptions.keepDateRangeOpen && rangeIndex === 0
             && !!monthNode?.closest("[class*='start-date'], [class*='range-start'], [class*='is-start']") && visible(liveMonthPanel());
+          if (!trace.confirmed && !trace.rangeStartPending && monthNode?.isConnected && visible(monthNode)) {
+            trace.datePicker.monthClick = {};
+            await clickOption(monthNode, true, () => dateValueMatches(liveDateControl(), value), trace.datePicker.monthClick);
+            trace.confirmed = !!await waitFor(() => dateValueMatches(liveDateControl(), value), 800);
+            trace.rangeStartPending = !trace.confirmed && chooseOptions.keepDateRangeOpen && rangeIndex === 0
+              && !!monthNode.closest("[class*='start-date'], [class*='range-start'], [class*='is-start']") && visible(liveMonthPanel());
+          }
           trace.selectedValue = value;
           trace.afterConfirm = trace.datePicker.after = controlValue(liveDateControl());
           if (!trace.confirmed) trace.failure = trace.rangeStartPending ? "range-awaiting-end" : monthNode ? "display-not-confirmed" : "month-not-found";
@@ -1708,7 +2005,7 @@
     const host = [...document.querySelectorAll("[role=radio], [role=option]")].find((el) => visible(el) && matches(el.textContent)
       && !(/籍贯|居住地|户籍|户口/.test(label) && /省|自治区|特别行政区|市|区|县/.test(String(value)))
       && (normalize(labelText(el.parentElement || el)).includes(normalize(label)) || normalize(labelText(el)).includes(normalize(label))));
-    if (host && (!target || !isChoiceControl(target) || target.matches("input[type=radio], [role=radio]"))) { trace.path = "radio-host"; host.click(); await closeVisibleDropdowns(target || host); trace.confirmed = true; return true; }
+    if (host && (!target || !isChoiceControl(target) && !isAutocompleteControl(target) || target.matches("input[type=radio], [role=radio]"))) { trace.path = "radio-host"; host.click(); await closeVisibleDropdowns(target || host); trace.confirmed = true; return true; }
     const exactItem = [...document.querySelectorAll(".form-item")].find((el) => normalize(el.querySelector(`${fieldLabelSelector}, label`)?.innerText) === normalize(label));
     const container = target ? fieldContainer(target) : exactItem || [...document.querySelectorAll("label, fieldset, [role=group], div")].find((el) => {
       const content = normalize(el.textContent);
@@ -1726,28 +2023,69 @@
     const readControl = () => controlValue(control, controlBox)
       || (!control.isConnected ? clean(controlBox?.querySelector("[class*='select__tag'], [class*='select-tag']")?.textContent) : "");
     Object.assign(trace, { path: "popup", before: readControl() });
-    let popup = chooseOptions.popup?.isConnected && isPopup(chooseOptions.popup) ? chooseOptions.popup : [...new Set([...popupFor(control, false), ...(lastOpenedControl === control && lastOpenedPopup && isPopup(lastOpenedPopup) ? [lastOpenedPopup] : [])])].sort((a, b) => {
+    let popup = chooseOptions.popup?.isConnected && visible(chooseOptions.popup) && (isPopup(chooseOptions.popup) || popupMatchesValue(chooseOptions.popup, value)) ? chooseOptions.popup : [...new Set([...popupFor(control, false), ...(lastOpenedControl === control && lastOpenedPopup && isPopup(lastOpenedPopup) ? [lastOpenedPopup] : [])])].sort((a, b) => {
       const distance = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - control.getBoundingClientRect().left) + Math.abs(r.top - control.getBoundingClientRect().top); };
       return distance(a) - distance(b);
     })[0];
-    if (!popup) { popup = await openChoice(control); trace.opening = { ...lastOpening }; }
+    let searched = false;
+    if (!popup) {
+      popup = await openChoice(control, (isAutocompleteControl(control) || isSearchableChoiceInput(control)) && !isLocationLabel(label) ? value : undefined);
+      trace.opening = { ...lastOpening };
+      searched = searched || !!lastOpening?.searched;
+    }
     lastOpenedControl = control;
     lastOpenedPopup = popup;
     const controlRect = control.getBoundingClientRect();
     await waitForOptions(popup);
     trace.popupFound = !!popup;
+    if (!popup && isAutocompleteControl(control)) {
+      trace.failure = "popup-not-found";
+      restoreChoiceSearch(control, trace.before);
+      await closeVisibleDropdowns(control);
+      return false;
+    }
+    const multiValues = String(value).split(/[、,，;；]/).map((part) => part.trim()).filter(Boolean);
+    const multiplePopup = isMultipleChoice(control, popup);
+    if (isLocationLabel(label) && multiValues.length > 1 && !multiplePopup) {
+      const confirmed = await choose(label, multiValues[0], control, skipDatePair, { ...chooseOptions, popup, locationHint: "" });
+      if (confirmed) confirmedSingleLocationSources.set(resolveField(elementKeys.get(control)) || control, String(value));
+      lastChoice = { ...lastChoice, sourceSelection: "first-for-single", sourceCount: multiValues.length };
+      return confirmed;
+    }
+    if (multiValues.length > 1 && multiplePopup) {
+      trace.path = "popup-multi";
+      trace.multiValues = multiValues;
+      await closeVisibleDropdowns(control);
+      lastOpenedControl = lastOpenedPopup = null;
+      trace.parts = [];
+      for (const part of multiValues) {
+        const protectedValue = valueMatches(readControl(), part, label);
+        const partTarget = target?.isConnected ? target : resolveField(elementKeys.get(target));
+        const confirmed = protectedValue || !!partTarget && await choose(label, part, partTarget, skipDatePair, { ...chooseOptions, locationHint: isLocationLabel(label) ? "" : chooseOptions.locationHint });
+        trace.parts.push({ value: part, confirmed, ...(protectedValue ? { protected: true } : { choice: lastChoice }) });
+        if (!confirmed) { trace.failure = `multi:${lastChoice?.failure || "not-confirmed"}`; lastChoice = trace; return false; }
+      }
+      trace.selectedValue = trace.parts.map(part => part.choice?.selectedValue || part.value).join("、");
+      trace.afterConfirm = controlValue(control, controlBox);
+      trace.confirmed = valueMatches(trace.afterConfirm, value, label);
+      if (!trace.confirmed) trace.failure = "multi-display-not-confirmed";
+      lastChoice = trace;
+      return trace.confirmed;
+    }
     const options = () => popup ? popupOptionNodes(popup) : [];
     const refreshPopup = async () => {
       const previous = popup;
       const found = await waitFor(() => {
         const distance = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - controlRect.left) + Math.abs(r.top - controlRect.top); };
         return popupFor(control, false).sort((a, b) => distance(a) - distance(b))[0]
-          || popupFor(control).filter((candidate) => candidate !== previous).sort((a, b) => distance(a) - distance(b))[0];
+          || (previous?.isConnected && isPopup(previous) ? previous : null)
+          || nearbySuggestionPopup(control, value)
+          || nearbyPopup(control);
       }, 1400);
       if (found) popup = found;
     };
     const isLocationPicker = isLocationLabel(label);
-    const search = [popup?.querySelector("input:not([type=hidden])"), target].find((el) => el?.tagName === "INPUT" && !el.readOnly);
+    const search = [...(popup?.querySelectorAll(searchInputSelector) || []), target].find(editableSearch);
     // A salary search box filters by displayed range text; searching a raw
     // number such as 3500 hides “2001 ~ 4000”. Match ranges from real options.
     const matchedProficiency = proficiencyOption(value, options(), label);
@@ -1756,6 +2094,7 @@
     if (search && !isLocationPicker && !/薪|工资|待遇/.test(label) && !options().some((el) => matches(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")))) {
       // Autocomplete controls need the desired text before their real options exist.
       setSearchValue(search, proficiencySearch || value);
+      searched = true;
       await refreshPopup();
     }
     if (isLocationPicker) {
@@ -1770,7 +2109,7 @@
       // A flat province menu can accept only the explicitly supplied parent region.
       if (province && popup && regions.filter((option) => /省$/.test(clean(option.textContent))).length >= 3
         && !regions.some((option) => sameArea(clean(option.textContent), location[2]))
-        && !popup?.querySelector("[role=tree], [role=treeitem], [aria-haspopup], [class*='cascader'], [class*='switcher'], [class*='expand']")) {
+        && !popup?.querySelector("[role=tree], [role=treeitem], [aria-haspopup], [class*='cascader'], [class*='switcher'], [class*='expand'], .area-item-container")) {
         trace.option = trace.selectedValue = clean(province.textContent);
         await clickOption(selectionTarget(province));
         await closeVisibleDropdowns(control);
@@ -1788,7 +2127,7 @@
         }
         return "";
       })();
-      const cityName = chooseOptions.locationHint || location?.[2] || companyHint || String(value).trim();
+      const cityName = chooseOptions.locationHint || location?.[2] || String(value).trim() || companyHint;
       const cityPart = location?.[2] || String(value).match(/([^省自治区特别行政区]+?(?:市|区|县))$/)?.[1] || cityName;
       const provincePart = location?.[1] || "";
       const provinceBare = provincePart.replace(/(?:特别行政区|自治区|自治州|省)$/, "");
@@ -1802,19 +2141,22 @@
         provincePart && cityPart ? `${provincePart}-${cityPart}` : ""
       ].map(clean).filter((term) => term.length >= 2))];
       trace.area = { protocol: CONTENT_PROTOCOL, source: String(value), hint: chooseOptions.locationHint || "", companyHint, city: cityName, popupFound: !!areaPopup };
-      if (!areaPopup && search && popup && !popup.querySelector("[role=tree], [role=treeitem], [class*='cascader']")) {
-        // Flat remote city search is not a region tree. Match the supplied
-        // province as well as the city; a same-name city is not a substitute.
+      if (!areaPopup && (search || location) && popup && !popup.querySelector("[role=tree], [role=treeitem], [class*='cascader'], [class*='tree'][class*='node'] [class*='label']")) {
+        // Flat city choices are not a region tree. Match the supplied
+        // province path when present; a bare city must be unique in the menu.
         locationSearchTerms = citySearchTerms;
         const sourceParts = (location ? location.slice(1, /城市/.test(label) ? 3 : 4) : [rawLocation]).filter(Boolean).map(areaName);
+        const candidateParts = (text) => String(text).replace(/^中国(?:大陆|内地)?[\/／,，\s\->]+/i, "").split(/[\/／,，、\s\->]+/).filter(Boolean).map(areaName);
         locationOptionMatches = (text) => {
-          const parts = String(text).replace(/^中国(?:大陆|内地)?[\/／,，\s\->]+/i, "").split(/[\/／,，、\s\->]+/).filter(Boolean).map(areaName);
-          return parts.length >= sourceParts.length && sourceParts.every((part, index) => part === parts[parts.length - sourceParts.length + index]);
+          const parts = candidateParts(text);
+          return parts.length >= sourceParts.length && sourceParts.every((part, index) => part === parts[parts.length - sourceParts.length + index])
+            || parts.length === 1 && sourceParts.length > 1 && parts[0] === sourceParts.at(-1)
+              && popupOptionNodes(popup, false).filter(node => candidateParts(clean(node.textContent)).at(-1) === parts[0]).length === 1;
         };
       }
       if (areaPopup) {
         const search = [...areaPopup.querySelectorAll('input[placeholder="搜索"], input[placeholder*="搜"], input[placeholder*="输入"], input[placeholder*="地点"], input[placeholder*="城市"], input[aria-label*="输入"], input[aria-label*="地点"], input[aria-label*="城市"]')].find((input) => visible(input) && !input.readOnly)
-          || [control, target, controlBox].flatMap((node) => node?.matches?.("input:not([type=hidden])") ? [node] : [...(node?.querySelectorAll?.("input:not([type=hidden])") || [])]).find((input) => visible(input) && !input.readOnly);
+          || [control, target, controlBox].flatMap((node) => node?.matches?.(searchInputSelector) ? [node] : [...(node?.querySelectorAll?.(searchInputSelector) || [])]).find(editableSearch);
         trace.area.searchFound = !!search;
         const writeSearch = (text) => {
           if (!search) return;
@@ -1826,9 +2168,18 @@
           const areaText = (node) => clean(node?.innerText || node?.textContent);
           const isAtsxTree = !!areaPopup.querySelector(".atsx-tree, .atsx-select-tree");
           const matchesArea = (text) => normalize(text) === normalize(name) || normalize(text) === `${normalize(name)}市` || normalize(name) === `${normalize(text)}市`;
-          if (!isAtsxTree) return [...areaPopup.querySelectorAll(".area-item-container, [role=option], li, button, label, [class*=item], [class*=option], div, span")]
-            .filter((el) => visible(el) && (normalize(el.textContent) === normalize(name) || normalize(el.textContent).endsWith(normalize(name)) || normalize(el.textContent) === `${normalize(name)}市`))
-            .sort((a, b) => (a.children.length - b.children.length) || (a.getBoundingClientRect().width * a.getBoundingClientRect().height - b.getBoundingClientRect().width * b.getBoundingClientRect().height))[0];
+          if (!isAtsxTree) {
+            const items = [...areaPopup.querySelectorAll(".area-item-container, [role=option], li")];
+            const rows = (items.length ? items : [...areaPopup.querySelectorAll("button, label, [class*=item], [class*=option], div, span")]).filter(visible)
+              .filter(node => {
+                const parts = areaText(node).split(/[\/／>\s]+/).filter(Boolean);
+                const label = node.querySelector("[class*='text-label'], [class*='Text-label']");
+                const leaf = label ? areaText(label).split(/[\/／>\s]+/).filter(Boolean).at(-1) : parts.at(-1);
+                const parents = parts.filter(part => !sameArea(part, leaf));
+                return sameArea(leaf, name) && (!parents.length || !provincePart || sameArea(parents.at(-1), provincePart));
+              });
+            return rows.length === 1 ? rows[0] : null;
+          }
           // ATSX repeats hidden title text; generic pickers may include a parent region.
           const treeCity = [...areaPopup.querySelectorAll("[role=treeitem]")].filter(visible).find((item) => matchesArea(areaText(item.querySelector("[data-cy-value], [class*='tree-title'], [class*='Tree-title']") || item)));
           if (treeCity) return treeCity;
@@ -1860,7 +2211,7 @@
           for (const term of citySearchTerms) {
             writeSearch(term); await wait(100);
             searchTerm = term;
-            const result = await waitForAreaResult(term);
+            const result = await waitForAreaResult(cityName);
             trace.area.queryResults.push({ term, count: result.count, settled: result.settled });
             city = result.city;
             if (city) { searchTerm = term; break; }
@@ -1880,30 +2231,39 @@
               : [selectionTarget(city)];
             trace.commitTarget = { tag: cityTargets[0]?.tagName || "", className: String(cityTargets[0]?.className || ""), text: clean(cityTargets[0]?.textContent) };
             const selectedBefore = clean(areaPopup.innerText || areaPopup.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
-            const checkedBefore = !!city.querySelector?.("input:checked, [aria-checked=true], [class*='checkbox-checked'], [class*='Checkbox-checked']");
+            const checkedBefore = !!city.querySelector?.("input:checked, [aria-checked=true], [class*='checkbox-checked'], [class*='Checkbox-checked'], [class*='CheckboxChecked']");
             const displaySelected = () => isAtsxTree && !visible(areaPopup) && valueMatches(clean(controlBox?.innerText || control?.innerText), cityName, label);
             const selectionChanged = () => {
               const selected = clean(areaPopup.innerText || areaPopup.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "";
-              const currentCity = findArea(searchTerm);
-              return displaySelected() || selected && selected !== selectedBefore || !checkedBefore && !!currentCity?.querySelector?.("input:checked, [aria-checked=true], [class*='checkbox-checked'], [class*='Checkbox-checked']");
+              const currentCity = findArea(cityName);
+              return displaySelected() || selected && selected !== selectedBefore || !checkedBefore && !!currentCity?.querySelector?.("input:checked, [aria-checked=true], [class*='checkbox-checked'], [class*='Checkbox-checked'], [class*='CheckboxChecked']");
             };
             trace.selectionAttempts = [];
-            for (const cityTarget of cityTargets) {
-              const attempt = { target: String(cityTarget.className || cityTarget.tagName), connected: cityTarget.isConnected };
-              trace.selectionAttempts.push(attempt);
-              try {
-                await clickOption(cityTarget, true, null, attempt);
-                trace.selectionObserved = !!await waitFor(selectionChanged, 1500);
-              } catch (error) { attempt.error = String(error?.message || error); }
-              if (trace.selectionObserved) break;
+            trace.selectionObserved = checkedBefore;
+            for (let targetIndex = 0; targetIndex < cityTargets.length && !trace.selectionObserved; targetIndex++) {
+              for (const plainTrusted of [false, true]) {
+                const liveCity = findArea(cityName);
+                const liveTargets = isAtsxTree ? [
+                  liveCity?.querySelector?.(".atsx-select-tree-checkbox"),
+                  liveCity?.querySelector?.(".atsx-select-tree-node-content-wrapper, .atsx-tree-node-content-wrapper"), liveCity
+                ].filter((node, index, list) => node && list.indexOf(node) === index) : [selectionTarget(liveCity)];
+                const cityTarget = liveTargets[targetIndex];
+                if (!cityTarget?.isConnected) break;
+                const attempt = { target: String(cityTarget.className || cityTarget.tagName), plainTrusted, connected: true };
+                trace.selectionAttempts.push(attempt);
+                await clickOption(cityTarget, true, null, attempt, plainTrusted);
+                trace.selectionObserved = !!await waitFor(selectionChanged, 800);
+                if (trace.selectionObserved) break;
+              }
             }
             trace.afterClick = readControl();
             const confirm = confirmationFor(areaPopup, control);
             trace.confirmFound = !!confirm;
-            if (confirm) { await clickOption(confirm, true); await wait(120); }
+            if (confirm) { trace.confirmClick = {}; await clickOption(confirm, true, () => !visible(areaPopup), trace.confirmClick, true); await wait(120); }
             trace.afterConfirm = readControl();
-            trace.confirmed = trace.selectionObserved || !!await waitFor(() => (displaySelected() || valueMatches(readControl(), cityName, label)) && !(search === target && normalize(readControl()) === normalize(searchTerm)), 800);
+            trace.confirmed = !!await waitFor(() => (displaySelected() || valueMatches(readControl(), cityName, label)) && !(search === target && normalize(readControl()) === normalize(searchTerm)), 800);
             if (!trace.confirmed) trace.failure = "area-display-not-confirmed";
+            logChoice("area-confirmed", trace);
             await closeVisibleDropdowns(control);
             return trace.confirmed;
           }
@@ -1915,32 +2275,38 @@
           return false;
         }
       }
-      if (location) {
+      const rolelessTree = !!popup?.querySelector("[class*='tree'][class*='node'] [class*='label']");
+      if (location || rolelessTree) {
         // Midas first shows countries. Parent row clicks select a value;
         // expanding requires its dedicated switcher before selecting a city.
-        const locationTree = () => [...document.querySelectorAll("[role=tree], .ihr_tree-tree")].filter(visible).sort((left, right) => {
+        const treeRows = "[role=treeitem], .ihr_tree-item, [role=menuitem], [class*='tree'][class*='node']:not(button):not(span):not([class*='label']):not([class*='indent']):not([class*='checker']):not([class*='expand'])";
+        const treeLabel = "[data-cy-value], [class*='tree-title'], [class*='Tree-title'], .ihr_tree-item_label, [class*='node'][class*='label']";
+        const locationTree = () => [...document.querySelectorAll("[role=tree], .ihr_tree-tree, [class*='tree'][class*='list']")].filter(visible).sort((left, right) => {
           const distance = (el) => { const rect = el.getBoundingClientRect(); return Math.abs(rect.left - controlRect.left) + Math.abs(rect.top - controlRect.bottom); };
           return distance(left) - distance(right);
         })[0];
-        const locationOptions = () => [...new Set([...options(), ...(popup?.querySelectorAll("[role=treeitem], .ihr_tree-item, [role=menuitem]") || []), ...(locationTree()?.querySelectorAll("[role=treeitem], .ihr_tree-item") || [])])].filter(visible);
-        const locationText = (el) => clean(el?.querySelector?.("[data-cy-value], [class*='tree-title'], [class*='Tree-title'], .ihr_tree-item_label")?.textContent || el?.textContent);
+        const locationOptions = () => [...new Set([...options(), ...(popup?.querySelectorAll(treeRows) || []), ...(locationTree()?.querySelectorAll(treeRows) || [])])].filter(visible);
+        const locationText = (el) => clean(el?.querySelector?.(treeLabel)?.textContent || el?.textContent);
+        const treeRow = el => el.closest(treeRows) || el;
+        const cascadeColumn = el => el?.closest("[class*='cascader-menu'][role=menu], div[class~='el-cascader-menu']") || el?.closest("ul[class*='cascader-menu']");
+        const treeLevel = el => el?.style.getPropertyValue("--ihr-tree-item-level") || String(el?.querySelectorAll("[class*='indent']").length || 0);
         const liveTreeItem = (item) => {
           if (!item || item.isConnected) return item;
           const key = item.getAttribute("data-tree-key") || item.getAttribute("data-virtual-key");
-          const matches = [...new Set(locationOptions().map(el => el.closest("[role=treeitem], .ihr_tree-item, [role=menuitem]") || el))].filter(el => key
+          const matches = [...new Set(locationOptions().map(treeRow))].filter(el => key
             ? (el.getAttribute("data-tree-key") || el.getAttribute("data-virtual-key")) === key
-            : locationText(el) === locationText(item) && el.style.getPropertyValue("--ihr-tree-item-level") === item.style.getPropertyValue("--ihr-tree-item-level"));
+            : locationText(el) === locationText(item) && treeLevel(el) === treeLevel(item));
           return matches.length === 1 ? matches[0] : null;
         };
         const treeItem = (name, parent) => {
-          const items = [...new Set(locationOptions().map(el => el.closest("[role=treeitem], .ihr_tree-item, [role=menuitem]") || el))];
+          const items = [...new Set(locationOptions().map(treeRow))];
           if (parent) { parent = liveTreeItem(parent); if (!parent) return null; }
-          const virtual = parent?.matches(".ihr_tree-item") && parent.style.getPropertyValue("--ihr-tree-item-level") !== "";
-          const level = Number(parent?.style.getPropertyValue("--ihr-tree-item-level"));
+          const virtual = parent && (parent.matches(".ihr_tree-item") && parent.style.getPropertyValue("--ihr-tree-item-level") !== "" || rolelessTree && parent.querySelector(treeLabel));
+          const level = Number(treeLevel(parent));
           const afterParent = items.indexOf(parent) + 1;
-          const column = parent?.closest("ul[class*='cascader-menu']");
+          const column = cascadeColumn(parent);
           const childColumn = column?.nextElementSibling;
-          const end = virtual ? items.findIndex((el, index) => index >= afterParent && Number(el.style.getPropertyValue("--ihr-tree-item-level")) <= level) : -1;
+          const end = virtual ? items.findIndex((el, index) => index >= afterParent && Number(treeLevel(el)) <= level) : -1;
           const matches = items.filter((el, index) => sameArea(locationText(el), name)
             && (!parent || (column ? childColumn?.contains(el) : parent.contains(el) || virtual && index >= afterParent && (end < 0 || index < end) || !virtual && !parent.matches("[role=treeitem]"))));
           return matches.length === 1 ? matches[0] : null;
@@ -1968,36 +2334,56 @@
         const expandTreeItem = async (item) => {
           item = liveTreeItem(item);
           if (!item) return false;
-          const switcher = item?.querySelector?.(".atsx-tree-switcher, [data-cy=switcher], .ihr_tree-item_status");
+          const switcher = item?.querySelector?.(".atsx-tree-switcher, [data-cy=switcher], .ihr_tree-item_status, button[class*='expand'], button[class*='switcher']");
           const opened = () => {
             const current = liveTreeItem(item), currentSwitcher = current?.querySelector(".atsx-tree-switcher, [data-cy=switcher], .ihr_tree-item_status");
-            const column = current?.closest("ul[class*='cascader-menu']");
+            const column = cascadeColumn(current);
             if (column) return /(?:^|[\s_-])active(?:$|[\s_-])/.test(String(current.className)) && !!column.nextElementSibling?.querySelector("[role=menuitem], li");
-            return current?.getAttribute("aria-expanded") === "true" || /(?:^|[\s_-])expand(?:ed)?(?:$|[\s_-])/.test(String(current?.className || "")) || (currentSwitcher ? /(?:^|[_-])open\b/.test(String(currentSwitcher.className || "")) : [...(current?.querySelectorAll("[role=group]") || [])].some(visible));
+            const rows = [...new Set(locationOptions().map(treeRow))], next = rows[rows.indexOf(current) + 1];
+            return rolelessTree && current && next && Number(treeLevel(next)) > Number(treeLevel(current))
+              || current?.getAttribute("aria-expanded") === "true" || /(?:^|[\s_-])expand(?:ed)?(?:$|[\s_-])/.test(String(current?.className || "")) || (currentSwitcher ? /(?:^|[_-])open\b/.test(String(currentSwitcher.className || "")) : [...(current?.querySelectorAll("[role=group]") || [])].some(visible));
           };
           if (opened()) return true;
           // ponytail: only trust the debugger click after the tree actually expands.
           await clickOption(switcher || selectionTarget(item), true, opened);
           return !!await waitFor(opened, 1200);
         };
-        const mainland = treeItem("中国大陆");
+        // A checkbox tree may be a flat city list, with no parent region to
+        // expand. Only discard the supplied parent when the menu has no
+        // hierarchy signals and offers a unique equivalent city.
+        const flatCity = rolelessTree && location && !popup.querySelector("[role=group], [aria-level], [aria-expanded], [class*='indent'], [class*='switcher'], [class*='expand']")
+          && !treeItem(location[1]) && !treeItem("中国") && !treeItem("中国大陆");
+        trace.tree = { flat: !!flatCity, roleless: rolelessTree, sourceParts: location?.length || 0,
+          rows: new Set(locationOptions().map(treeRow)).size,
+          hierarchy: popup.querySelectorAll("[role=group], [aria-level], [aria-expanded], [class*='indent'], [class*='switcher'], [class*='expand']").length,
+          cityFound: !!location && !!treeItem(location[2]), provinceFound: !!location && !!treeItem(location[1]), countryFound: !!treeItem("中国大陆") || !!treeItem("中国") };
+        if (rolelessTree && search && (!flatCity || !treeItem(location[2]))) {
+          setSearchValue(search, areaName(location?.[2] || rawLocation));
+          await waitFor(() => location ? treeItem(location[flatCity ? 2 : 1]) : treeItem(rawLocation), 1600);
+        }
+        const mainland = location && treeItem("中国大陆");
         if (mainland) await expandTreeItem(mainland);
-        const province = await findTreeItem(location[1]);
-        if (province) {
-          let leaf = province;
-          const path = location.slice(1).filter(Boolean);
+        const province = flatCity ? await findTreeItem(location[2]) : location && await findTreeItem(location[1], rolelessTree ? mainland : undefined);
+        if (province || rolelessTree && !location) {
+          let leaf = province || await findTreeItem(rawLocation);
+          const path = location ? location.slice(flatCity ? 2 : 1).filter(Boolean) : [];
           for (const name of path.slice(1)) {
-            let child = await findTreeItem(name, leaf);
+            let child = treeItem(name, leaf);
             if (!child) { await expandTreeItem(leaf); child = await findTreeItem(name, leaf); }
             leaf = child;
             if (!leaf) break;
             // A city-only column picker may receive a saved city + district.
-            if (leaf.closest("ul[class*='cascader-menu']") && !/expand/.test(String(leaf.className))) break;
+            if (cascadeColumn(leaf) && leaf.getAttribute("aria-haspopup") !== "true" && !/expand/.test(String(leaf.className))) break;
           }
           if (leaf) {
             trace.option = trace.selectedValue = locationText(leaf);
-            await clickOption(leaf.querySelector(".atsx-tree-node-content-wrapper, .ihr_tree-item_info") || selectionTarget(leaf), true,
-              () => valueMatches(readControl(), trace.selectedValue, label));
+            const checkbox = leaf.querySelector("input[type=checkbox], [role=checkbox]");
+            const selected = () => {
+              const current = liveTreeItem(leaf)?.querySelector("input[type=checkbox], [role=checkbox]");
+              return current ? current.checked || current.getAttribute("aria-checked") === "true" : valueMatches(readControl(), trace.selectedValue, label);
+            };
+            if (!selected()) await clickOption(leaf.querySelector(".atsx-tree-node-content-wrapper, .ihr_tree-item_info") || selectionTarget(leaf), true, selected);
+            if (checkbox && !await waitFor(selected, 800)) leaf = null;
           }
           const confirm = confirmationFor(popup, control);
           if (confirm) { await clickOption(confirm, true); await wait(120); }
@@ -2005,8 +2391,16 @@
           trace.confirmed = !!leaf && !!await waitFor(() => valueMatches(readControl(), trace.selectedValue, label), 1000);
           if (!trace.confirmed) trace.failure = leaf?.querySelector(".ihr_tree-item_status--visible") ? "location-requires-more-detail" : leaf ? "tree-display-not-confirmed" : "tree-city-not-found";
           logChoice("tree-confirmed", trace, choiceState(control, popup, leaf));
+          if (!trace.confirmed) restoreChoiceSearch(control, trace.before);
           await closeVisibleDropdowns(control);
           return trace.confirmed;
+        }
+        if (rolelessTree) {
+          // An explicit tree path must not fall through to a same-name foreign leaf.
+          trace.failure = "tree-province-not-found";
+          restoreChoiceSearch(control, trace.before);
+          await closeVisibleDropdowns(control);
+          return false;
         }
       }
     }
@@ -2022,13 +2416,19 @@
       const salary = /薪|工资|待遇/.test(label) && salaryOption(value, list);
       const rank = /排名/.test(label) && rankOption(value, list);
       const proficiency = proficiencyOption(value, list, label);
-      trace.match = { exact: !!exact, salary: !!salary, rank: !!rank, proficiency: !!proficiency, semantic: semantic.length };
-      const matched = exact || salary || rank || proficiency || (semantic.length === 1 ? semantic[0] : null);
-      const other = !matched && /^(?:证书名称|获奖项|竞赛名称)$/.test(label) && list.find((el) => normalize(el.textContent) === "其他");
+      const languageChoice = /^(?:语言|语言类型|语言类别|外语类别|语言名称|语种)[＊*]?$/.test(label);
+      const language = languageChoice
+        ? list.filter(el => languageToken(el.textContent) === languageToken(value)) : [];
+      const identity = /证件类型/.test(label) && /身份证/.test(String(value))
+        ? list.find((el) => /居民身份证/.test(clean(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")))) : null;
+      trace.match = { exact: !!exact, salary: !!salary, rank: !!rank, proficiency: !!proficiency, identity: !!identity, semantic: semantic.length };
+      const matched = languageChoice ? language.length === 1 ? language[0] : null
+        : exact || identity || salary || rank || proficiency || (semantic.length === 1 ? semantic[0] : null);
+      const other = !matched && /^(?:证书名称|获奖项|竞赛名称)$/.test(label.replace(/[＊*]/g, "")) && list.find((el) => normalize(el.textContent) === "其他");
       if (other) trace.fallback = "page-option-other";
       return matched || other || null;
     };
-    let option = await waitFor(findOption, 1400);
+    let option = await waitFor(findOption, searched ? 5000 : 1400);
     if (!option && search && locationSearchTerms.length) {
       trace.area.queryResults = [];
       for (const term of locationSearchTerms) {
@@ -2056,7 +2456,7 @@
         if (!option) { scroller.scrollTop = originalTop; scroller.dispatchEvent(new Event("scroll", { bubbles: true })); }
       }
     }
-    if (!option && search && /^(?:证书名称|获奖项|竞赛名称)$/.test(label)) {
+    if (!option && search && /^(?:证书名称|获奖项|竞赛名称)$/.test(label.replace(/[＊*]/g, ""))) {
       setSearchValue(search, "");
       await refreshPopup();
       option = await waitFor(findOption, 800);
@@ -2074,7 +2474,6 @@
     trace.commit = "option-click";
     const commitTargets = selectionTargets(option);
     const commitTarget = commitTargets[0];
-    const phoenixTwoColumn = /(?:^|\s)list-item-container-two(?:\s|$)/.test(String(option.closest?.("[class*='list-item-container'], [class*='List-item-container']")?.className || ""));
     trace.commitTarget = { tag: commitTarget?.tagName || "", className: String(commitTarget?.className || ""), text: clean(commitTarget?.textContent) };
     trace.commitTargets = commitTargets.map((node) => ({ tag: node?.tagName || "", className: String(node?.className || ""), text: clean(node?.textContent) }));
     trace.beforeClickState = choiceState(control, popup, commitTarget);
@@ -2095,36 +2494,46 @@
       .map((candidate) => clean(candidate.innerText || candidate.textContent).match(/已选(?:地区)?\s*\d+\s*\/\s*\d+/)?.[0] || "")
       .sort((left, right) => Number(right.match(/\d+/)?.[0] || 0) - Number(left.match(/\d+/)?.[0] || 0))[0] || "";
     const selectedBeforeClick = selectedCount();
-    const multiSelector = !!selectedBeforeClick || !!control.closest?.(".phoenix-select--multi, [class*='select--multi'], [class*='Select--multi']");
-    const optionChecked = () => !!findOption()?.querySelector?.("[aria-checked=true], input:checked, [class*='CheckboxChecked'], [class*='checkbox-checked'], [class*='RadioChecked'], [class*='radio-checked']");
+    const valueBeforeClick = readControl();
+    const multiSelector = !!selectedBeforeClick || isMultipleChoice(control, popup);
+    const optionChecked = () => {
+      const option = findOption(), treeItem = option?.closest?.("[role=treeitem], [class*='tree__node'], [class*='tree-node'], [class*='TreeNode']");
+      const selected = selectionTarget(option);
+      return !!(selected?.checked || selected?.getAttribute?.('aria-checked') === 'true' || selected?.querySelector?.("[aria-checked=true], input:checked, [class*='CheckboxChecked'], [class*='checkbox-checked'], [class*='RadioChecked'], [class*='radio-checked']") || option?.querySelector?.("[aria-checked=true], input:checked, [class*='CheckboxChecked'], [class*='checkbox-checked'], [class*='RadioChecked'], [class*='radio-checked']")
+        || treeItem?.querySelector?.("[aria-checked=true], input:checked, [class*='CheckboxChecked'], [class*='checkbox-checked'], [class*='RadioChecked'], [class*='radio-checked']"));
+    };
     const checkedBeforeClick = optionChecked();
     const selectionChanged = () => {
       const selected = selectedCount();
-      return selected && selected !== selectedBeforeClick || optionChecked() !== checkedBeforeClick;
+      const current = readControl();
+      return selected && selected !== selectedBeforeClick || optionChecked() !== checkedBeforeClick
+        || !!current && current !== valueBeforeClick;
     };
     trace.selectionAttempts = [];
-    if (!multiSelector) {
-      await clickOption(commitTarget);
-      if (searchSelect && !selectedBefore && !await waitFor(selectedOption, 350) && popup?.isConnected && visible(popup))
-        await clickOption(selectionTarget(findOption() || option), true, selectedOption);
-    }
-    else if (phoenixTwoColumn) {
-      // Keep the proven Phoenix two-column event timing; ordinary rows need
-      // the fresh-node retries below because they remount without selecting.
-      for (const target of commitTargets) {
-        const attempt = { target: String(target.className || target.tagName), connected: !!target.isConnected };
-        trace.selectionAttempts.push(attempt);
-        await clickOption(target, true, selectionChanged, attempt);
-        trace.selectionObserved = !!await waitFor(selectionChanged, 800);
-        if (trace.selectionObserved) break;
+    if (multiSelector && checkedBeforeClick) {
+      trace.selectionObserved = true;
+      trace.selectionProtected = true;
+    } else if (!multiSelector && selectedBefore) {
+      // Search can commit an exact option; clicking it again can deselect it.
+      trace.selectionProtected = true;
+      trace.commit = "selected-option-protected";
+    } else if (!multiSelector) {
+      trace.optionClick = {};
+      await clickOption(commitTarget, isAutocompleteControl(control), null, trace.optionClick);
+      if (popup?.isConnected && visible(popup) && !await waitFor(selectionChanged, 350)) {
+        for (const fallbackTarget of selectionTargets(option).filter((candidate) => candidate !== commitTarget)) {
+          await clickOption(fallbackTarget);
+          if (await waitFor(selectionChanged, 350)) break;
+        }
       }
-    } else for (let targetIndex = 0; targetIndex < commitTargets.length && !trace.selectionObserved; targetIndex++) {
+    }
+    else for (let targetIndex = 0; targetIndex < commitTargets.length && !trace.selectionObserved; targetIndex++) {
       for (const plainTrusted of [false, true]) {
         if (!popup?.isConnected || !visible(popup)) {
           control.click();
           await wait(80);
           await refreshPopup();
-          const liveSearch = popup?.querySelector?.("input:not([type=hidden])");
+          const liveSearch = [...(popup?.querySelectorAll?.(searchInputSelector) || [])].find(editableSearch);
           if (liveSearch && !isLocationPicker && !/薪|工资|待遇/.test(label) && !options().some((el) => matches(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")))) {
             setSearchValue(liveSearch, proficiencySearch || value);
             await refreshPopup();
@@ -2188,8 +2597,8 @@
       trace.confirmAttempted = true;
       trace.confirmTarget = { tag: confirm.tagName || "", className: String(confirm.className || ""), connected: !!confirm.isConnected };
       trace.confirmClick = {};
-      const plainPhoenixConfirm = !!phoenixSelectionCart && /期望从事行业/.test(label);
-      trace.confirmMode = plainPhoenixConfirm ? "plain-trusted-industry" : phoenixSelectionCart ? "trusted-after-cart" : "trusted";
+      const plainPhoenixConfirm = !!phoenixSelectionCart;
+      trace.confirmMode = plainPhoenixConfirm ? "plain-trusted-cart" : "trusted";
       await clickOption(confirm, multiSelector, multiSelector ? () => !visible(popup) : null, trace.confirmClick, plainPhoenixConfirm);
       if (multiSelector) await waitFor(() => !visible(popup), 800);
       else await wait(120);
@@ -2204,13 +2613,16 @@
       committedControl?.blur?.();
       await closeVisibleDropdowns(committedControl || control);
     }
+    if (autocomplete) pendingSuggestions.delete(committedControl || control);
     const expectedDisplay = year && month && pairIndex < 0 ? value : trace.selectedValue || value;
     trace.confirmed = !!await waitFor(() => valueMatches(readControl(), expectedDisplay, label)
-      && (!searchSelect || !selectedBefore && selectedOption() || !committedControl?.value
-        && !!choiceRoot(committedControl)?.querySelector("[class*='selection-item']"))
+      && (!searchSelect || !committedControl?.value || !selectedBefore && selectedOption()
+        || trace.selectionProtected && selectedBefore
+        || autocomplete && trace.clickObserved && (trace.afterClickState.input !== trace.beforeClickState.input || !trace.afterClickState.popupVisible))
       && (!autocomplete || !popup?.isConnected || !visible(popup)), 800);
     trace.afterConfirm = readControl();
     if (!trace.confirmed) {
+      if (autocomplete) pendingSuggestions.add(committedControl || control);
       trace.failure = autocomplete && valueMatches(readControl(), expectedDisplay, label) ? "popup-still-open" : "display-not-confirmed";
       // Phoenix multi-selects commit through their empty control input.
       // Restoring that input after the footer click clears its pending tags.
@@ -2218,17 +2630,38 @@
       else trace.restoreSkipped = "multi-selector";
     }
     trace.afterConfirmState = choiceState(committedControl || control, popup, commitTarget);
+    if (trace.confirmed && autocomplete) pendingSuggestions.delete(committedControl || control);
     logChoice("confirmed", trace, trace.afterConfirmState);
     await closeVisibleDropdowns(committedControl || control);
     lastChoice = trace;
     return trace.confirmed;
   }
 
+  const languageToken = (value) => {
+    const token = normalize(value);
+    const groups = [['英语','英文','english'],['中文','汉语','普通话','chinese','mandarin'],['日语','日本语','japanese'],['韩语','朝鲜语','korean'],['法语','french'],['德语','german'],['西班牙语','西语','spanish'],['俄语','russian'],['葡萄牙语','葡语','portuguese'],['阿拉伯语','arabic'],['意大利语','italian']];
+    return groups.find(names => names.includes(token))?.[0] || token;
+  };
   const valueMatches = (actual, expected, label = "") => {
     const a = normalize(actual); const e = normalize(expected);
     if (!a || !e) return false;
+    if (a === e) return true;
+    if (isSchoolLabel(label)) return false;
+    if (/^(?:语言|语言类型|语言类别|外语类别|语言名称|语种)[＊*]?$/.test(label)) return languageToken(actual) === languageToken(expected);
+    if (isLocationLabel(label)) {
+      const locationKey = (text) => normalize(text).replace(/总部|分部|办事处/g, "").replace(/(?:特别行政区|自治区|自治州|省|市|地区|盟|区|县)/g, "");
+      const expectedParts = String(expected).split(/[、,，;；]/).map((part) => locationKey(part)).filter(Boolean);
+      const actualKey = locationKey(actual);
+      const actualParts = String(actual).split(/[、,，;；]/).map(locationKey).filter(Boolean);
+      if (expectedParts.length > 1 || actualParts.length > 1) {
+        return expectedParts.every(part => actualKey.includes(part) || actualParts.some(actual => actual.length >= 2 && part.endsWith(actual)));
+      }
+      if (expectedParts[0] && actualKey === expectedParts[0]) return true;
+    }
+    if (/学历类型|受教育类型|培养方式|学习形式|学习方式|就读方式/.test(label) && /全日制|统招|非统招|自学考试/.test(expected))
+      return /非全日制/.test(expected) ? /非全日制/.test(actual) : /非统招/.test(expected) ? /非统招/.test(actual) : /自学考试/.test(expected) ? /自学考试/.test(actual) : /全日制|统招/.test(actual) && !/非全日制/.test(actual);
     if (/描述|职责|简介|摘要|工作内容|亮点|业绩/.test(label)) return a === e;
-    if (a === e || a.includes(e) || e.includes(a)) return true;
+    if (a.includes(e) || e.includes(a)) return true;
     if (/(?:获奖|奖项|奖励|大赛|比赛|竞赛)(?:级别|等级)/.test(label) && normalize(awardScope(actual)) === normalize(awardScope(expected))) return true;
     if (/薪|工资|待遇/.test(label)) {
       const actualRange = salaryRange(actual); const expectedRange = salaryRange(expected);
@@ -2242,9 +2675,46 @@
       && actualDate[0] === expectedDate[0] && actualDate[1] === expectedDate[1]
       && (!expectedDate[2] || !actualDate[2] || actualDate[2] === expectedDate[2]);
   };
+  const fieldValueMatches = (target, expected, label) => {
+    if (!target) return false;
+    if (isLocationLabel(label) && (target.tagName === "SELECT" && !target.multiple || confirmedSingleLocationSources.get(target) === String(expected)))
+      expected = String(expected).split(/[、,，;；]/).map(part => part.trim()).filter(Boolean)[0] || expected;
+    if (pendingSuggestions.has(target) || pageValidationFailed(target)) return false;
+    if (target.matches(".phoenix-radio-group")) return normalize(controlValue(target)) === normalize(expected);
+    if (/日期|时间|年月/.test(label) && dateParts(expected).length >= 2) return dateValueMatches(target, expected);
+    if (target.tagName === "SELECT" && normalize(target.selectedOptions[0]?.textContent) === normalize(expected)) return true;
+    return isChoiceControl(target) || isLocationLabel(label)
+      ? valueMatches(controlValue(target), expected, label) : clean(controlValue(target)) === clean(expected);
+  };
+  const verifyTargets = (targets) => (targets || []).map(({ key, value, label }) => ({ key, label, confirmed: fieldValueMatches(resolveField(key), value, label) }));
+  const pageValidationFailed = (target) => {
+    if (target?.getAttribute("aria-invalid") === "true") return true;
+    const box = fieldContainer(target);
+    const range = target?.closest?.("[class*='picker'][class*='range'], [class*='date-editor'][class*='range']");
+    const inputs = [...(box?.querySelectorAll("input") || [])].filter(visible);
+    const peers = range || inputs.length === 2 && inputs.every(input => /开始|结束|start|end/i.test(datePartText(input))) ? inputs : [];
+    const choicePeers = inputs.length === 2 && inputs.every(isChoiceControl) ? inputs : [];
+    const selectedRoot = choiceRoot(target);
+    return [...(box?.querySelectorAll('[role=alert], [class*="feedback"], [class*="error"], [class*="invalid"]') || [])]
+      .some(node => {
+        const text = clean(node.textContent);
+        // Compound selectors share a required error while the next choice is still empty.
+        if (choicePeers.includes(target) && controlValue(target) && choicePeers.some(peer => peer !== target && !controlValue(peer))
+          && selectedRoot?.querySelector('[aria-valuetext], [class*="single_selected"], [class*="selection-item"], [class*="display-value"]')
+          && selectedRoot.getAttribute('aria-invalid') !== 'true' && !/(?:^|[\s_-])(?:error|invalid)(?:$|[\s_-])/i.test(String(selectedRoot.className))
+          && /^(?:请选择|请输入|必填|required)$/i.test(text)) return false;
+        // A shared date error can name only the missing endpoint, including separate pickers.
+        if (peers.length === 2 && dateParts(controlValue(target)).length >= 2 && peers.some(peer => peer !== target && !controlValue(peer)
+          && (/完整.*(?:时间|日期)|complete.*(?:date|range)/i.test(text)
+            || fieldTitle(peer) && text.startsWith(fieldTitle(peer)) && !text.startsWith(fieldTitle(target))))) return false;
+        return visible(node) && !node.closest('[aria-hidden="true"], [hidden]')
+          && /必填|不能为空|无效|不正确|不存在|请选择|请填写|请输入|invalid|required|not found/i.test(text);
+      });
+  };
   async function applyValue(label, value, target, applyOptions = {}) {
     lastChoice = null;
     if (!target || value == null || value === "") return false;
+    if (isLocationLabel(label) && target.tagName === "SELECT" && !target.multiple) value = String(value).split(/[、,，;；]/).map(part => part.trim()).filter(Boolean)[0] || value;
     if (target.matches('input[type=checkbox], [role=checkbox]') && /没有.*(?:经历|经验|成果)|无.*(?:经历|经验|成果)/.test(associatedLabels(target).join(" "))) {
       lastChoice = { failure: "negative-experience-toggle" }; return false;
     }
@@ -2279,9 +2749,14 @@
     target = relocated || target;
     const defaultGpaStep = target.type === "number" && !target.hasAttribute("step") && /GPA|绩点/i.test(semanticText(target))
       && target.validity?.stepMismatch && !["badInput", "rangeOverflow", "rangeUnderflow", "valueMissing", "customError"].some(key => target.validity[key]);
-    if (target.getAttribute("aria-invalid") === "true" || target.validity && !target.validity.valid && !defaultGpaStep) return false;
+    if (pageValidationFailed(target) || target.validity && !target.validity.valid && !defaultGpaStep) {
+      lastChoice = { ...(lastChoice || {}), confirmed: false, failure: "page-validation-failed" }; return false;
+    }
     const selected = pendingEnd ? value : lastChoice?.selectedValue || value;
-    if (valueMatches(controlValue(target, originalBox), selected, label)) return true;
+    if (valueMatches(controlValue(target, originalBox), selected, label)) {
+      if (autocompleteText && lastChoice?.confirmed && lastChoice?.selectedValue) pendingSuggestions.delete(target);
+      return true;
+    }
     const parts = dateParts(value); const controls = dateControls(target); const index = controls.indexOf(target);
     if (index >= 0 && parts.length >= 2) {
       const expectedPart = index % 2 ? Number(parts[1]) : Number(parts[0]);
@@ -2308,6 +2783,7 @@
     };
     const buttonInSection = (el) => {
       if (!section) return true;
+      if (anchor === "语言类型" && languageCategoryButton(el)) return true;
       if (["获奖经历", "竞赛", "荣誉"].includes(section) && !inSection(el, section)) return false;
       const sectionNames = [section, ...(SECTION_ALIASES[section] || [])].map(normalize);
       const title = normalize(sectionTitle(el));
@@ -2335,15 +2811,15 @@
       }
       const atsxButton = atsxSection?.querySelector(".createFormSection-addBtn, .formOperate-addBtn");
       const button = atsxButton && visible(atsxButton) ? atsxButton : directButton && visible(directButton) && buttonInSection(directButton) ? directButton : [...document.querySelectorAll("[id$='_addButton'], button, a, [role=button], [class*='add'], [class*='Add'], div, span")].find((el) => {
-        if (!visible(el) || el.disabled || el.getAttribute("aria-disabled") === "true" || el.closest("[data-resume-autofill-ui]")) return false;
+        if (!visible(el) || uploadControl(el) || el.disabled || el.getAttribute("aria-disabled") === "true" || el.closest("[data-resume-autofill-ui]")) return false;
         const text = normalize(el.textContent);
         if (text.length > 40 || el.querySelector(controlSelector) || el.matches("div, span") && (!/^(?:添加|新增|\+|＋)/.test(text) || [...el.children].some((child) => normalize(child.textContent) === text || /^(?:添加|新增)/.test(normalize(child.textContent))))) return false;
         const specific = text.includes(wanted) || buttonPatterns.some((pattern) => pattern.test(text));
         const genericInSection = /^(?:添加|新增|\+|＋)$/.test(text) && sectionNames.some((name) => name && normalize(sectionTitle(el)).includes(name));
         return buttonInSection(el) && (specific || genericInSection);
       });
-      if (!button) break;
-      button.click();
+      if (!button || uploadControl(button)) break;
+      await clickOption(button, true, () => countFields() > existing);
       clicks++;
       const next = await waitFor(() => {
         const current = countFields();
@@ -2420,14 +2896,14 @@
     rowAddDiagnostics = [];
     // Filling must never delete rows already present on a job-application page.
     const education = await addRows("教育经历", counts?.education || 0, "学校名称", [/(?:添加|新增).*教育.*经历/], "教育背景");
-    const languages = await addRows("语言能力", counts?.languages || counts?.english || 0, "语言类型", [/(?:添加|新增).*语言.*(?:能力|水平)/], "语言能力");
+    const languages = await addRows("语言能力", counts?.languages || counts?.english || 0, "语言类型", [/(?:添加|新增).*(?:语言|外语).*(?:能力|水平|类别|语种)/], "语言能力");
     const work = await addRows("工作经历", counts?.work || 0, "公司名称", [/(?:添加|新增).*工作.*经历/], "工作经历");
     const internships = await addRows("实习经历", counts?.internships || 0, "公司名称", [/(?:添加|新增).*实习.*经历/], "实习经历");
     const projects = await addRows("项目经历", counts?.projects || 0, "项目名称", [/(?:添加|新增).*项目.*(?:经历|经验)/], "项目经验");
-    const cadres = await addRows("学生干部经历", counts?.cadres || 0, "职务", [/添加.*(?:学生|干部|校园|社团).*经历/], "学生干部经历");
+    const cadres = await addRows("学生干部经历", counts?.cadres || 0, "职务", [/(?:添加|新增).*(?:(?:学生|干部|校园|社团).*经历|在校实践|校内实践)/], "学生干部经历");
     const englishCertificates = await addRows("英语能力", counts?.englishCertificates || 0, "证书名称", [/添加.*英语.*能力/], "英语能力");
     const certificates = await addRows("证书", counts?.certificates || 0, "证书名称", [/添加.*证书/], "证书");
-    const skills = await addRows("技能", counts?.skills || 0, "技能名称", [/添加.*技能/], "技能");
+    const skills = await addRows("技能", counts?.skills || 0, "技能名称", [/(?:添加|新增).*(?:技能|计算机能力)/], "技能");
     const unifiedAwards = await addRows("获奖情况", counts?.awards || 0, "获奖项", [/(?:添加|新增).*(?:奖励活动|获奖|奖项|荣誉)/], "获奖经历");
     const competitions = await addRows("竞赛", counts?.competitions || 0, "获奖项", [/(?:添加|新增).*(?:竞赛|大赛|比赛)/], "竞赛");
     const honors = await addRows("荣誉", counts?.honors || 0, "获奖项", [/(?:添加|新增).*(?:奖励|荣誉|奖学金)/], "荣誉");
@@ -2453,8 +2929,9 @@
     const deferredFields = [];
     const deferChoice = (field) => {
       const hint = `${field?.type || ""} ${fieldTitle(field)} ${field?.getAttribute("aria-label") || ""} ${field?.getAttribute("placeholder") || ""}`;
-      return !!options.deferChoices && isChoiceControl(field) && !/(日期|时间|年月|date|month)/i.test(hint)
-        && /期望从事行业|期望行业|意向行业|期望从事职业|期望职业|意向职位/.test(hint);
+      return !!options.deferChoices && !/(日期|时间|年月|date|month)/i.test(hint)
+        && (isSuggestionControl(field) || isChoiceControl(field)
+          && /期望从事行业|期望行业|意向行业|期望从事职业|期望职业|意向职位|(?:职位|职业|岗位)(?:类别|类型)/.test(hint));
     };
     const hasSection = (section) => moduleTitles().some((text) => [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some((name) => normalize(text).includes(name))) || fields().some((el) => {
       const title = normalize(sectionTitle(el));
@@ -2513,10 +2990,11 @@
       structuredAttempts: [], targetFields: [], experienceLocations: []
     };
     const highestRows = (profile.education || []).filter((row) => degreeRank(row?.degree) > 0 && degreeRank(row.degree) === degreeRank(highestDegree));
-    for (const [label, key] of [["最高学历学校", "school"], ["最高学历专业", "major"], ["最高学历毕业日期", "end"], ["预计毕业时间", "end"], ["毕业学校", "school"], ["毕业院校", "school"], ["毕业学院", "college"], ["毕业院系", "college"], ["毕业学校专业", "major"], ["毕业专业", "major"]]) {
-      const targets = fields().filter((field) => normalize(fieldTitle(field).replace(/[＊*]/g, "")) === normalize(label));
+    for (const [label, key] of [["最高学历学校", "school"], ["最高学历专业", "major"], ["最高学历毕业日期", "end"], ["预计毕业时间", "end"], ["毕业学校", "school"], ["毕业院校", "school"], ["毕业学院", "college"], ["毕业院系", "college"], ["毕业学校专业", "major"], ["毕业专业", "major"], ["毕业时间", "end"], ["学习形式", "training"]]) {
+      const targets = fields().filter((field) => normalize(fieldTitle(field).replace(/[＊*]/g, "")) === normalize(label)
+        && (!["毕业时间", "学习形式"].includes(label) || !/教育|学历/.test(moduleTitle(field))));
       if (!targets.length) continue;
-      const detail = { label, section: "最高学历", row: 1 };
+      const detail = { key: targets.length === 1 ? rememberField(targets[0]) : "", label, section: "最高学历", row: 1 };
       if (targets.length !== 1 || highestRows.length !== 1) {
         diagnostics.structuredAttempts.push({ ...detail, reason: "ambiguous-highest-education" }); continue;
       }
@@ -2533,7 +3011,7 @@
     for (const [label, value] of intent) {
       if (!value) continue;
       const field = findField(label);
-      const detail = { section: "求职意向", row: 1, label, value: String(value), targetIndex: field ? fields().indexOf(field) : -1, targetLabel: field ? fieldTitle(field) || labelText(field) : "" };
+      const detail = { key: field ? rememberField(field) : "", section: "求职意向", row: 1, label, value: String(value), targetIndex: field ? fields().indexOf(field) : -1, targetLabel: field ? fieldTitle(field) || labelText(field) : "" };
       noteEmpty(field, value, label);
       if (onlyEmpty && field && controlValue(field)) { skippedFields.push(label); diagnostics.structuredAttempts.push({ ...detail, reason: "page-value-protected", actual: controlValue(field), matchesSource: valueMatches(controlValue(field), value, label) }); continue; }
       if (deferChoice(field)) { deferredFields.push(label); diagnostics.structuredAttempts.push({ ...detail, reason: "deferred-to-ai" }); continue; }
@@ -2556,7 +3034,13 @@
     // A separate certificate module asks for certificates again, including English exams.
     const certificates = profile.certificates || [];
     diagnostics.structuredAttempts.push(...prepared.diagnostics);
-    const competitions = (profile.awards || []).filter(competitionAward), honors = (profile.awards || []).filter(item => !competitionAward(item));
+    const awardTitles = moduleTitles().join(" ");
+    const competitions = (profile.awards || []).filter(competitionAward);
+    // Generic honor sections are the only award destination on many forms;
+    // keep explicit contest names usable there when no contest section exists.
+    const honors = /竞赛|大赛|比赛/.test(awardTitles)
+      ? (profile.awards || []).filter(item => !competitionAward(item))
+      : (profile.awards || []);
     diagnostics.rows = await ensureRows({ education: profile.education?.length, languages: profile.languages?.length, work: workRows.length, internships: internshipRows.length, projects: profile.projects?.length, cadres: profile.cadres?.length, englishCertificates: englishCertificates.length, certificates: certificates.length, skills: profile.skills?.length, awards: profile.awards?.length, competitions: competitions.length, honors: honors.length });
     const describeTarget = (field, method) => field ? {
       method, label: fieldTitle(field) || labelText(field), element: field.tagName.toLowerCase(), module: moduleTitle(field),
@@ -2577,18 +3061,22 @@
         const field = [...(container.matches?.(controlSelector) ? [container] : []), ...container.querySelectorAll(controlSelector)]
           .find((el) => editable(el) && anchorMatch(el, anchor));
         const actual = controlValue(field);
-        if (!actual) return undefined;
-        const matches = remaining.map((row, index) => ({ row, index })).filter(({ row }) => {
+        const description = /^(?:证书名称|获奖项)$/.test(anchor) && rowDescription(container);
+        const descriptionBinding = (!actual || /^(?:其他|其它)$/.test(actual)) && description;
+        if (!actual && !descriptionBinding) return undefined;
+        const matches = (sourceRows || []).filter(row => {
           const expected = row?.[key];
+          if (descriptionBinding) return clean(row.description) === description;
           return anchor === "证书名称" && certificateExam(actual) && certificateExam(expected)
-            ? certificateExam(actual) === certificateExam(expected) : normalize(actual) === normalize(expected);
+            ? certificateExam(actual) === certificateExam(expected) : anchor === "语言类型" ? languageToken(actual) === languageToken(expected) : normalize(actual) === normalize(expected);
         });
-        return matches.length === 1 ? remaining.splice(matches[0].index, 1)[0] : null;
+        const index = matches.length === 1 ? remaining.indexOf(matches[0]) : -1;
+        return index >= 0 ? remaining.splice(index, 1)[0] : null;
       });
       return [...matched.map((row) => row === undefined ? remaining.shift() : row), ...remaining];
     };
     const groups = [
-      [profile.education, [["学校名称", "school"], ["学校所在城市", "location"], ["学院名称", "college"], ["专业名称", "major"], ["学历", "degree"], ["开始时间", "start"], ["结束时间", "end"], ["学历类型", "training"], ["GPA类型", "gpaType"], ["GPA", "gpa"], ["成绩排名", "rank"]], "学校名称", "教育背景"],
+      [profile.education, [["学历类型", "training"], ["学历", "degree"], ["学校名称", "school"], ["学校所在城市", "location"], ["学院名称", "college"], ["专业名称", "major"], ["开始时间", "start"], ["结束时间", "end"], ["GPA类型", "gpaType"], ["GPA", "gpa"], ["成绩排名", "rank"]], "学校名称", "教育背景"],
       [englishCertificates, certificateMapping, "证书名称", "英语能力"],
       [certificates, certificateMapping, "证书名称", "证书"],
       [profile.skills, [["技能名称", "name"], ["掌握程度", "proficiency"], ["使用时间总计", "duration"], ["技能描述", "description"]], "技能名称", "技能"],
@@ -2648,7 +3136,7 @@
             && formatNumberedText(controlValue(field)).trim() === formatNumberedText(row?.description).trim();
           const fieldName = `${section}[${index + 1}].${label}`;
           const targetLabel = field ? (fieldTitle(field) || labelText(field)) : "";
-          const detail = { section, row: index + 1, company: row?.company || "", label, value: String(value || ""), datePartCount: /时间/.test(label) ? dateParts(value).length : 0, dateControlCount: /时间/.test(label) && field ? dateControls(field).length : 0, targetIndex: field ? fields().indexOf(field) : -1, targetLabel, targetRepeatIndex: field ? repeatIndex(field, targetLabel) : -1 };
+          const detail = { key: field ? rememberField(field) : "", section, row: index + 1, company: row?.company || "", label, value: String(value || ""), datePartCount: /时间/.test(label) ? dateParts(value).length : 0, dateControlCount: /时间/.test(label) && field ? dateControls(field).length : 0, targetIndex: field ? fields().indexOf(field) : -1, targetLabel, targetRepeatIndex: field ? repeatIndex(field, targetLabel) : -1 };
           if (anchor === "获奖项" && label === "获奖项" && !awardTypeConfirmed) {
             deferredFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "choice-parent-not-confirmed" }); continue;
           }
@@ -2685,7 +3173,9 @@
           const range = fullDateRange(field);
           const rangeEnd = label === "开始时间" && range[0] === field ? row?.end : "";
           if (rangeEnd) noteEmpty(range[1], rangeEnd, "结束时间");
-          const applied = await applyValue(label, value, field, { rangeEnd });
+          let applied = false, interactionError = false;
+          lastChoice = null;
+          try { applied = await applyValue(label, value, field, { rangeEnd }); } catch { interactionError = true; }
           if (key === "_type") awardTypeConfirmed = applied;
           if (label === "语言类型") languageTypeConfirmed = applied;
           if (/开始时间/.test(label)) startDateConfirmed = applied && dateValueMatches(field, value);
@@ -2693,7 +3183,7 @@
             if (field && lastChoice?.fallback === "page-option-other") expectedEmpty.set(rememberField(field), { value: lastChoice.selectedValue, label });
             filled++; filledFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "filled", actual: controlValue(field), choice: lastChoice });
           }
-          else { structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: "page-option-or-validation-failed", actual: controlValue(field), choice: lastChoice }); }
+          else { structuredMissing++; missingFields.push(fieldName); diagnostics.structuredAttempts.push({ ...detail, reason: interactionError ? "page-interaction-error" : "page-option-or-validation-failed", actual: controlValue(field), choice: lastChoice }); }
         }
       }
     }
@@ -2718,8 +3208,11 @@
   }
 
   const runtime = globalThis.chrome?.runtime;
-  const locateField = (key) => {
-    const target = resolveField(key);
+  const locateField = (key, locator) => {
+    const target = resolveField(key) || (() => {
+      const match = matchReviewField(formSchema(), locator);
+      return match ? resolveField(match.key) : null;
+    })();
     if (!target) return { located: false };
     target.scrollIntoView({ block: "center", inline: "nearest" });
     const original = target.style.outline;
@@ -2730,32 +3223,34 @@
   function showPageAction(result) {
     if (window.top !== window || !result && fields().length < 4 || !runtime?.sendMessage) return { shown: false };
     const existing = document.getElementById("resume-autofill-page-action");
-    if (existing?.querySelector("button")?.disabled) return { shown: true, protocol: CONTENT_PROTOCOL };
+    if (!result && existing?.dataset.contentInstance === scanId && existing.querySelector("button")?.disabled) return { shown: true, protocol: CONTENT_PROTOCOL };
     const panel = existing || document.createElement("aside");
     panel.id = "resume-autofill-page-action";
     panel.dataset.resumeAutofillUi = "true";
     panel.dataset.contentProtocol = String(CONTENT_PROTOCOL);
-    panel.dataset.contentBuild = "100-scholarship-type-source";
+    panel.dataset.contentBuild = "100-virtual-city-committed-input";
     panel.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 32px);box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;gap:8px;padding:12px;background:white;color:#173e30;border:1px solid #b5d8c7;border-radius:10px;font:14px system-ui;box-shadow:0 4px 18px #0002";
-    if (!result && existing?.querySelector("details[data-section=diagnostics]")) return { shown: true, protocol: CONTENT_PROTOCOL };
+    if (!result && existing?.dataset.contentInstance === scanId && existing.querySelector("details[data-section=diagnostics]") && existing.querySelector("details[data-section=review]")) return { shown: true, protocol: CONTENT_PROTOCOL };
+    panel.dataset.contentInstance = scanId;
     const oldButton = panel.querySelector("button");
     const button = oldButton ? oldButton.cloneNode(true) : document.createElement("button");
     oldButton?.replaceWith(button);
     button.type = "button";
+    button.disabled = false;
     button.textContent = "简历助手：填充当前页面";
     button.style.cssText = "display:block;width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #b5d8c7;border-radius:7px;background:#f5fff8;color:#173e30;font:inherit;text-align:left;cursor:pointer";
     const status = panel.querySelector('[role="status"]') || document.createElement("p");
     status.setAttribute("role", "status");
     status.style.cssText = "margin:0;max-height:48px;overflow:auto;color:#526b5d;font-size:12px;line-height:1.45";
-    const detailStyle = "max-height:calc((100vh - 112px) / 2);min-height:0;overflow:auto;overscroll-behavior:contain;margin:0;border-top:1px solid #e1eee6;padding-top:4px";
+    const detailStyle = "flex:0 1 auto;max-height:calc((100vh - 180px) / 2);min-height:0;overflow:auto;overscroll-behavior:contain;margin:0;border-top:1px solid #e1eee6;padding-top:4px";
     const summaryStyle = "position:sticky;top:0;z-index:1;padding:4px 0;background:white;color:#173e30;font-weight:600;cursor:pointer";
     const details = panel.querySelector("details[data-section=diagnostics]") || panel.querySelector("details") || document.createElement("details");
     const legacyReview = details.querySelector("[data-review]");
     const reviewDetails = panel.querySelector("details[data-section=review]") || document.createElement("details");
     details.dataset.section = "diagnostics";
     reviewDetails.dataset.section = "review";
-    details.style.cssText = detailStyle;
-    reviewDetails.style.cssText = detailStyle;
+    details.style.cssText = `${detailStyle};display:block`;
+    reviewDetails.style.cssText = `${detailStyle};display:block`;
     const summary = details.querySelector("summary") || document.createElement("summary");
     summary.textContent = "填充诊断";
     summary.style.cssText = summaryStyle;
@@ -2771,10 +3266,13 @@
     }
     const review = reviewDetails.querySelector('[data-review]') || legacyReview || document.createElement("div");
     review.dataset.review = "true";
-    const uncertain = [...(result?.diagnostics?.reviewFields || []), ...(result?.diagnostics?.remainingFields || [])];
-    const reviewable = uncertain.filter(field => field.key && field.reason !== "profile-value-missing").slice(0, 10);
+    review.style.cssText = "display:block;min-height:20px;max-height:220px;overflow:auto;margin:0;padding:0 0 2px;color:#173e30;font:12px/1.45 system-ui";
+    const reviewable = (result?.diagnostics?.remainingFields || []).filter(field => field.key && field.label);
     if (result) review.replaceChildren();
-    reviewDetails.hidden = result ? !reviewable.length : !review.childNodes.length;
+    if (result && !reviewable.length) review.textContent = "当前没有未填写的字段。";
+    if (!result && !review.childNodes.length) review.textContent = "填充后将在这里显示仍未填写的字段。";
+    reviewDetails.hidden = false;
+    if (result && reviewable.length) reviewDetails.open = true;
     legacyReview?.remove();
     const reviewed = new Set();
     for (const field of reviewable) {
@@ -2782,13 +3280,15 @@
       reviewed.add(field.key);
       const inspect = document.createElement("button");
       inspect.type = "button";
-      inspect.textContent = `截图核对：${field.label || "未确认字段"}（仅本地）`;
+      const caption = `截图核对：${field.label || "未确认字段"}（仅本地）`;
+      inspect.textContent = caption;
       inspect.style.cssText = "display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:6px 8px;border:1px solid #b5d8c7;border-radius:6px;background:#f8fbf9;color:#173e30;font:12px system-ui;text-align:left;cursor:pointer";
       inspect.addEventListener("click", async (event) => {
         if (!event.isTrusted || inspect.disabled) return;
         inspect.disabled = true;
         try {
-          const response = await runtime.sendMessage({ type: "RESUME_AUTOFILL_REVIEW_FIELD", key: field.fieldKey || field.key, frameId: field.frameId ?? result?.diagnostics?.frameId ?? 0 });
+          const response = await runtime.sendMessage({ type: "RESUME_AUTOFILL_REVIEW_FIELD", key: field.fieldKey || field.key,
+            locator: { label: field.label, module: field.module || "", row: field.row }, frameId: field.frameId ?? result?.diagnostics?.frameId ?? 0 });
           if (response?.image) {
             const preview = document.createElement("img");
             preview.src = response.image;
@@ -2800,14 +3300,16 @@
             host.attachShadow({ mode: "closed" }).append(preview);
             review.querySelector("[data-local-preview]")?.remove();
             review.append(host);
-          } else inspect.textContent = response?.located ? "请切回该网页再截图" : "字段已变化，请重新填充或人工核对";
-        } catch { inspect.textContent = "截图不可用，请人工核对"; }
+            inspect.textContent = caption;
+          } else inspect.textContent = response?.located ? `${field.label}：请切回该网页再截图` : `${field.label}字段已变化，请重新填充或人工核对`;
+        } catch { inspect.textContent = `${field.label}截图不可用，请人工核对`; }
         finally { inspect.disabled = false; }
       });
       review.append(inspect);
     }
     reviewDetails.append(reviewSummary, review);
-    panel.append(button, status, details, reviewDetails);
+    // Keep the review disclosure before the long diagnostic report so its title remains reachable.
+    panel.append(button, status, reviewDetails, details);
     button.addEventListener("click", async (event) => {
       if (!event.isTrusted || button.disabled) return;
       button.disabled = true;
@@ -2816,7 +3318,7 @@
       try {
         const result = await runtime.sendMessage({ type: "RESUME_AUTOFILL_PAGE_FILL_V100" });
         status.textContent = result?.status || "请打开简历助手侧栏后重试。";
-        if (result?.diagnostics) report.textContent = JSON.stringify(result.diagnostics, null, 2);
+        if (result?.diagnostics) showPageAction(result);
       } catch { status.textContent = "请打开简历助手侧栏后重试。"; }
       finally { button.disabled = false; }
     });
@@ -2831,7 +3333,7 @@
       PREPARE_PROFILE: () => prepareProfile(message.profile, message.corrections),
       FILL_PROFILE: () => fill(message.profile, message.options),
       APPLY_ASSIGNMENTS: () => applyAssignments(message.assignments),
-      LOCATE_FIELD: () => locateField(message.key),
+      LOCATE_FIELD: () => locateField(message.key, message.locator),
       SHOW_PAGE_ACTION: () => showPageAction(message.result)
     };
     const type = String(message?.type || "");
@@ -2869,5 +3371,5 @@
     globalThis.__resumeAutofillContentListener = contentListener;
     runtime.onMessage.addListener(contentListener);
   }
-  if (globalThis.__RESUME_AUTOFILL_TEST__) globalThis.__resumeAutofillTest = { formSchema, liveOptions, ensureRows, fill, prepareProfile, applyAssignments, rowField, isChoiceControl, showPageAction };
+  if (globalThis.__RESUME_AUTOFILL_TEST__) globalThis.__resumeAutofillTest = { formSchema, liveOptions, ensureRows, fill, prepareProfile, applyAssignments, rowField, isChoiceControl, showPageAction, matchReviewField, verifyTargets };
 })();

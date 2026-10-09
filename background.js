@@ -1,10 +1,5 @@
-const openTabPanel = (tabId) => {
-  if (chrome.sidePanel.setOptions) Promise.resolve(chrome.sidePanel.setOptions({ tabId, path: "popup.html", enabled: true })).catch(() => {});
-  return chrome.sidePanel.open({ tabId });
-};
-
 chrome.action.onClicked.addListener(async (tab) => {
-  if (tab.id != null) await openTabPanel(tab.id);
+  if (tab.id != null) await chrome.sidePanel.open({ tabId: tab.id });
 });
 
 const trustedClick = async (tabId, x, y, plain = false) => {
@@ -31,8 +26,10 @@ const trustedClick = async (tabId, x, y, plain = false) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "RESUME_AUTOFILL_REVIEW_FIELD" && sender.id === chrome.runtime.id && sender.tab?.id != null && sender.frameId === 0) {
     if (!Number.isInteger(message.frameId) || message.frameId < 0 || typeof message.key !== "string" || message.key.length > 160) { sendResponse({ located: false }); return; }
+    const locator = message.locator;
+    if (locator != null && (typeof locator.label !== "string" || locator.label.length > 160 || typeof locator.module !== "string" || locator.module.length > 160 || !Number.isInteger(locator.row) || locator.row < 0 || locator.row > 200)) { sendResponse({ located: false }); return; }
     (async () => {
-      const located = await chrome.tabs.sendMessage(sender.tab.id, { type: "LOCATE_FIELD_V100", key: message.key }, { frameId: message.frameId });
+      const located = await chrome.tabs.sendMessage(sender.tab.id, { type: "LOCATE_FIELD_V100", key: message.key, locator }, { frameId: message.frameId });
       if (!located?.located) return { located: false };
       await new Promise((resolve) => setTimeout(resolve, 150));
       const [active] = await chrome.tabs.query({ active: true, windowId: sender.tab.windowId });
@@ -43,7 +40,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "RESUME_AUTOFILL_PAGE_FILL_V100" && sender.id === chrome.runtime.id && sender.tab?.id != null && sender.frameId === 0) {
     (async () => {
-      await openTabPanel(sender.tab.id);
+      await chrome.sidePanel.open({ tabId: sender.tab.id });
       // Opening a side panel is asynchronous; wait only for its message listener.
       for (let attempt = 0; attempt < 15; attempt++) {
         try {
@@ -61,9 +58,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!Number.isFinite(x) || !Number.isFinite(y)) { sendResponse({ clicked: false }); return; }
   trustedClick(sender.tab.id, x, y, plain === true).then(sendResponse);
   return true;
-});
-
-chrome.tabs?.onRemoved?.addListener((tabId) => {
-  const storage = chrome.storage?.session?.remove ? chrome.storage.session : chrome.storage?.local;
-  Promise.resolve(storage?.remove?.(`resume-autofill.tab.${tabId}`)).catch(() => {});
 });
