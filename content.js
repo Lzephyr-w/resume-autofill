@@ -3,8 +3,10 @@
   if ((globalThis.__resumeAutofillContentProtocol || 0) > CONTENT_PROTOCOL) return;
   if (globalThis.__resumeAutofillContentListener) globalThis.chrome?.runtime?.onMessage?.removeListener(globalThis.__resumeAutofillContentListener);
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
-  document.getElementById("resume-autofill-page-action")?.setAttribute("data-content-build", "100-virtual-city-committed-input");
+  document.getElementById("resume-autofill-page-action")?.setAttribute("data-content-build", "100-add-entry-owner");
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const rangeSeparator = el => el?.tagName === 'INPUT' && (el.readOnly || el.disabled || el.getAttribute('aria-hidden') === 'true')
+    && /^[~～至—–-]$/.test(clean(el.value || el.placeholder || el.getAttribute('aria-label')));
   const visible = (el) => {
     if (!el || getComputedStyle(el).visibility === "hidden") return false;
     const rect = el.getBoundingClientRect();
@@ -31,6 +33,7 @@
   };
   const editable = (el) => {
     if (!el || uploadControl(el)) return false;
+    if (rangeSeparator(el)) return false;
     const choice = el.type === "radio" || el.type === "checkbox" || el.getAttribute("role") === "radio" || el.getAttribute("role") === "checkbox" || el.matches(".phoenix-radio-group");
     const customPicker = el.getAttribute("role") === "combobox" || el.hasAttribute("aria-haspopup") || /select|cascader|calendar|date|area/i.test(String(el.className || "")) || (el.readOnly || el.tagName === "BUTTON") && !!choiceRoot(el);
     const linkedLabel = el.id && [...document.querySelectorAll(`label[for="${CSS.escape(el.id)}"]`)].some(visible) || !!el.closest("label");
@@ -87,12 +90,12 @@
     if (/^(?:有限工作水平|初级水平)/.test(text)) return 1;
     if (/精通|专家|高级|无障碍沟通/.test(text)) return 4;
     if (/熟练|熟悉|掌握|商务会话/.test(text)) return 3;
-    if (/一般|中等|中级|日常会话/.test(text)) return 2;
-    if (/了解|入门|初级/.test(text)) return 1;
+    if (/一般|良好|中等|中级|日常会话/.test(text)) return 2;
+    if (/了解|普通|入门|初级/.test(text)) return 1;
     return 0;
   };
   const proficiencyOption = (value, candidates, label) => {
-    if (!/掌握程度|熟练程度|精通程度|技能等级|语言水平|等级自评|听说|读写/.test(label)) return null;
+    if (!/掌握程度|熟练程度|精通程度|技能等级|技能水平|熟练度|能力等级|语言水平|等级自评|听说|读写/.test(label)) return null;
     const exact = candidates.find(candidate => normalize(candidate.textContent || candidate) === normalize(value));
     if (exact) return exact;
     const level = proficiencyLevel(value);
@@ -104,8 +107,9 @@
     const language = level && languageOptions.length >= 3 && languageOptions.find((candidate) => clean(candidate.textContent || candidate) === languageLevels[level]);
     if (language) return language;
     const standard = ["", "了解", "掌握", "熟练", "精通"];
-    if (level && candidates.filter(candidate => standard.includes(clean(candidate.textContent || candidate))).length >= 3)
-      return candidates.find(candidate => clean(candidate.textContent || candidate) === standard[level]) || null;
+    const standardMatch = level && candidates.filter(candidate => standard.includes(clean(candidate.textContent || candidate))).length >= 3
+      && candidates.find(candidate => clean(candidate.textContent || candidate) === standard[level]);
+    if (standardMatch) return standardMatch;
     const matches = level && candidates.filter((candidate) => proficiencyLevel(candidate.textContent || candidate) === level);
     return matches?.length === 1 ? matches[0] : null;
   };
@@ -197,6 +201,12 @@
     if (wrapped) nodes.push(wrapped);
     return [...new Set(nodes)].map(labelCaption).filter(Boolean);
   };
+  const buttonCaption = el => {
+    const caption = clean(el?.getAttribute('aria-label') || associatedLabels(el)[0] || el?.getAttribute('title') || el?.textContent);
+    if (caption) return caption;
+    const icons = el?.matches('button, a, [role=button]') ? [el, ...el.querySelectorAll('[class], [data-icon], use')] : [el];
+    return icons.some(icon => /(?:^|[\s_-])(?:plus|add)(?:$|[\s_-])/i.test(`${icon?.getAttribute('class') || ''} ${icon?.getAttribute('data-icon') || ''} ${icon?.getAttribute('href') || ''}`.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/#/g, ' '))) ? '+' : '';
+  };
   const fieldTitle = (el) => {
     const box = fieldContainer(el);
     const label = [...(box?.querySelectorAll(`${fieldLabelSelector}, label`) || [])]
@@ -208,6 +218,8 @@
     if (label) {
       const caption = labelCaption(label);
       if (/时间|日期/.test(caption) && /^(?:请选择|请输入)?(?:开始|结束)(?:日期|时间|月)$/.test(el?.placeholder || "")) return el.placeholder.replace(/^(?:请选择|请输入)/, "").replace(/月$/, "时间");
+      const range = /时间|日期|年月/.test(caption) ? fullDateRange(el, caption) : [];
+      if (range.includes(el)) return range.indexOf(el) === 0 ? '开始时间' : '结束时间';
       if (/证件|身份证/.test(caption)) {
         const hint = clean(choiceRoot(el)?.querySelector("[class*=hint], [class*=placeholder]")?.textContent);
         if (/证件类型/.test(hint)) return "证件类型";
@@ -267,7 +279,8 @@
     const ownTitle = clean(fieldTitle(el));
     const scope = sectionScope(el);
     const heading = [...(scope?.querySelectorAll(".blockTitle, .section-title, .form-title, .ihr_recruit_resume_title_main, .ihr_recruit_resume_title, h1, h2, h3, h4, h5, h6, legend, [role=heading], [class*='blockTitle'], [class*='section-title'], [class*='model_title'], [class*='divider-title']") || [])]
-      .filter((node) => !node.contains(el) || !node.querySelector(controlSelector)).map((node) => { const copy = node.cloneNode(true); copy.querySelectorAll("[class*=tip], [class*=hint], [class*=description], .ihr_recruit_resume_title_main-action_button, small").forEach(child => child.remove()); return clean(copy.textContent); }).find((text) => text && text.length <= 80);
+      .filter(node => !node.contains(el) && !node.querySelector(controlSelector) && (node.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING))
+      .map((node) => { const copy = node.cloneNode(true); copy.querySelectorAll("button, a, [role=button], [class*=tip], [class*=hint], [class*=description], .ihr_recruit_resume_title_main-action_button, small").forEach(child => child.remove()); return clean(copy.textContent); }).filter(text => text && text.length <= 80).at(-1);
     if (heading) return heading;
     // Form libraries may put the module heading beside the entire form body.
     for (let node = el, depth = 0; node && depth < 24; node = node.parentElement, depth++) {
@@ -309,12 +322,18 @@
   };
   const awardModule = title => /竞赛|大赛|比赛/.test(title) ? /荣誉|奖励|奖学金|评奖|评优|表彰/.test(title) ? "获奖经历" : "竞赛"
     : /荣誉|奖励|奖学金|评奖|评优|表彰/.test(title) ? "荣誉" : "获奖经历";
+  const matchesSection = (title, section) => {
+    const value = normalize(title);
+    if (section === '技能' && /证书|语言|外语/.test(value)) return false;
+    if (/^项目(?:经历|经验)$/.test(section) && /项目(?:活动|[\/／、与及和])*(?:经历|经验)/.test(value)) return true;
+    return [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some(name => name && value.includes(name));
+  };
   const hasKnownSection = (title) => {
     const value = normalize(title);
     return /基本信息|基本资料|个人信息|求职意向|应聘信息|实践经历|资料证明人/.test(value)
-      || Object.entries(SECTION_ALIASES).some(([name, aliases]) => [name, ...aliases].map(normalize).some((item) => item && value.includes(item)));
+      || Object.keys(SECTION_ALIASES).some(name => matchesSection(value, name));
   };
-  const languageCategoryButton = (el) => /^[+＋]?(?:添加|新增)\s*(?:外语|语言)\s*(?:类别|类型|语种)$/.test(normalize(el?.innerText || el?.textContent));
+  const languageCategoryButton = (el) => /^[+＋]?(?:添加|新增)\s*(?:外语|语言)\s*(?:类别|类型|语种)$/.test(normalize(buttonCaption(el)));
   const languageCategoryScope = (el) => {
     for (let node = el; node && node !== document.body; node = node.parentElement) {
       if ([...node.querySelectorAll("button, a, [role=button]")].some(languageCategoryButton)
@@ -339,7 +358,7 @@
     if (!title) return !["竞赛", "荣誉"].includes(section);
     if (["获奖经历", "竞赛", "荣誉"].includes(section) && awardModule(title) !== section) return false;
     if (section === "证书" && /英语能力|英语证书|英语考试/.test(title)) return false;
-    return [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some((value) => title.includes(value));
+    return matchesSection(title, section);
   };
   const repeatedContainer = (el, anchor, section = "") => {
     const arrayRow = el?.closest?.("[class*='array-card'], [class*='array-item']");
@@ -383,7 +402,7 @@
     // A structured row may never fall back into another named module.  Keep
     // unlabeled component wrappers usable, but not a clearly different block.
     const candidates = ["竞赛", "荣誉"].includes(section) ? scoped
-      : scoped.length || !section ? scoped.length ? scoped : matches : matches.filter((el) => !hasKnownSection(sectionTitle(el)));
+      : scoped.length || !section ? scoped.length ? scoped : matches : matches.filter((el) => !sectionTitle(el));
     const rows = candidates.map((el) => repeatedContainer(el, anchor, section));
     const uniqueRows = [...new Set(rows)];
     // A few component libraries expose both the repeated item and its common
@@ -401,8 +420,8 @@
     if (label === "项目职务") return titled.find(({ control, title }) => title === normalize("职责") && !control.matches("textarea, [contenteditable='true']"))?.control || null;
     return null;
   };
-  const rowDescription = (row) => controlValue([...(row?.querySelectorAll("textarea") || [])]
-    .find(control => isDescription(fieldTitle(control) || labelText(control))));
+  const rowDescription = (row) => controlValue([...(row?.querySelectorAll("input, textarea, [contenteditable='true']") || [])]
+    .find(control => visible(control) && isDescription(fieldTitle(control) || labelText(control))));
   const rowField = (anchor, rowIndex, label, section = "", value = "") => {
     const candidate = rowContainers(anchor, section)[rowIndex];
     // A missing repeated row is not permission to reuse a similarly named
@@ -503,6 +522,7 @@
       : el.matches("[role=checkbox]") || el.type === "checkbox" ? "checkbox"
         : el.isContentEditable ? "contenteditable" : el.tagName === "SELECT" ? "select" : String(el.type || el.tagName).toLowerCase();
   const choiceRoot = (el) => {
+    const nativeText = el?.tagName === 'INPUT' && !el.readOnly && !el.matches('[role], [aria-haspopup]') && !isSuggestionControl(el);
     for (let node = el; node && node !== document.body; node = node.parentElement) {
       if (node === el && node.matches("input, textarea")) continue;
       const controls = [...node.querySelectorAll(controlSelector)].filter(visible);
@@ -512,9 +532,13 @@
         && !/date|month|calendar|(?:select|dropdown)[-_]*container(?:[\s_-]|$)/i.test(String(node.className || ""))
         && !(/picker/i.test(String(node.className || "")) && !/content|rendered/i.test(String(node.className || "")))) continue;
       if (node.getAttribute?.("role") === "combobox" || node.hasAttribute?.("aria-haspopup")
-        || /(^|[\s_-])(select|dropdown|cascader|picker|autocomplete|date[-_]editor)([\s_-]|$)/i.test(String(node.className || ""))) return node;
+        || /(^|[\s_-])(select|dropdown|cascader|picker|autocomplete|date[-_]editor)([\s_-]|$)/i.test(String(node.className || ""))) {
+        if (nativeText && !node.matches('[role], [aria-haspopup]') && !/cascader|picker|calendar|date/i.test(String(node.className || ''))
+          && !node.querySelector('[role], [aria-haspopup], [aria-valuetext], [class*="arrow"], [class*="Arrow"], [class*="suffix"], [class*="Suffix"], [data-icon], [class*="select"][class*="placeholder"], [class*="selection-item"], [class*="selected"], [class*="display-value"], [class*="display_value"]')) continue;
+        return node;
+      }
     }
-    return el?.matches("input, textarea") && /(^|[\s_-])(select|dropdown|cascader|picker|autocomplete|date[-_]editor)([\s_-]|$)/i.test(String(el.className || "")) ? el : null;
+    return !nativeText && el?.matches("input, textarea") && /(^|[\s_-])(select|dropdown|cascader|picker|autocomplete|date[-_]editor)([\s_-]|$)/i.test(String(el.className || "")) ? el : null;
   };
   const choiceTrigger = (el) => {
     for (let node = el?.parentElement; node && node !== document.body; node = node.parentElement)
@@ -524,7 +548,7 @@
     return root && !/(?:^|[\s_-])(?:date|month|calendar)(?:$|[\s_-])/i.test(String(root.className || "")) ? root : el;
   };
   const isSearchableChoiceInput = (el) => el?.tagName === "INPUT" && !el.readOnly && !["date", "month"].includes(el.type)
-    && !fullDateRange(el).includes(el) && !!choiceRoot(el) && choiceTrigger(el) !== el;
+    && !fullDateRange(el).includes(el) && (el.matches('[role=combobox], [aria-haspopup=listbox]') || !!choiceRoot(el) && choiceTrigger(el) !== el);
   const isExplicitTextInput = (el) => el?.tagName === "INPUT" && !el.readOnly && !el.getAttribute("role") && !el.hasAttribute("aria-haspopup")
     && el.closest("[class*='string_info'], [class*='string-info'], [class*='stringInfo'], [data-field-type='string_info']")?.querySelectorAll('input:not([type=hidden]), textarea, select').length === 1;
   const isSuggestionControl = (el) => el?.tagName === "INPUT" && !el.readOnly && (/auto[-_]?complete|suggest|typeahead|select[-_ ]search/i.test([
@@ -533,8 +557,8 @@
   const isAutocompleteControl = (el) => isSuggestionControl(el) || isExplicitTextInput(el) && !!choiceRoot(el)
     || el?.tagName === "INPUT" && !el.readOnly
     && !["date", "month"].includes(el.type) && !fullDateRange(el).includes(el)
-    && (el.hasAttribute("options") || el.closest('[class*="dropdown-open"], [class*="dropdown_open"]'))
-    && /(?:^|[\s_-])(?:select|autocomplete)(?:$|[\s_-])/i.test(String(choiceRoot(el)?.className || ""));
+    && (el.matches('[role=combobox], [aria-haspopup=listbox]') || (el.hasAttribute("options") || el.closest('[class*="dropdown-open"], [class*="dropdown_open"]'))
+      && /(?:^|[\s_-])(?:select|autocomplete)(?:$|[\s_-])/i.test(String(choiceRoot(el)?.className || "")));
   const isSchoolLabel = label => /^(?:毕业学校|毕业院校|最高学历学校|学校|院校|学校名称|学校全称|院校名称|就读学校)[＊*]?$/.test(clean(label));
   const isLocationLabel = (label) => /家庭|家乡|籍贯|居住|户籍|户口|城市|所在地点|所在地|就读地|(?:工作|期望).*地点/.test(label);
   const isChoiceControl = (el) => !!el && !isExplicitTextInput(el) && (el.tagName === "SELECT" || ["radio", "checkbox"].includes(el.type)
@@ -679,7 +703,7 @@
     "证书名称": ["证书", "资格证书"],
     "证书描述": ["描述", "说明", "证书说明"],
     "获得时间": ["获奖时间", "取得时间", "日期"],
-    "职务": ["职务", "干部职务", "担任职务", "角色", "实践名称", "实践项目", "活动名称"],
+    "职务": ["职务", "职位名称", "岗位名称", "干部职务", "担任职务", "角色", "实践名称", "实践项目", "活动名称"],
     "成绩排名": ["成绩排名", "专业排名", "排名"],
     "级别": ["级别", "组织级别", "活动级别"],
     "分数": ["分数", "成绩", "证书成绩"],
@@ -845,7 +869,7 @@
   console.assert(dateForms("2025.08").includes("2025-8"));
   console.assert(dateParts("2025")[0] === "2025");
   const looksLikeDate = (value) => /^\s*\d{4}\s*(?:年|[./-])\s*\d{1,2}(?:\s*(?:月|[./-])\s*\d{1,2})?\s*(?:月|日)?\s*$/.test(String(value || ""));
-  const isDescription = (label) => /描述|职责|评价|亮点/.test(normalize(label));
+  const isDescription = (label) => /描述|职责|评价|亮点|说明/.test(normalize(label));
   const popupSelector = "[role=listbox], [role=menu], [role=dialog], [role=grid], [class*='cascader-menus'], [class*='popup'], [class*='Popup'], [class*='dropdown'], [class*='Dropdown'], [class*='popover'], [class*='Popover'], [class*='picker'], [class*='Picker'], [class*='calendar'], [class*='Calendar'], [class*='options'], [class*='Options'], [class*='unmodeled-layer'], [class*='selector-container'], [class*='autocomplete'], [class*='Autocomplete'], [class*='suggest'], [class*='Suggest'], [class*='menu'], [class*='Menu'], [class*='listbox'], [class*='Listbox'], [data-popper-placement], [data-floating-ui-portal]";
   const isPopup = (el) => {
     if (!visible(el) || uploadControl(el) || el.closest('[aria-hidden="true"], [hidden], [inert]') || /(?:^|[\s_-])(?:leave|exit)(?:$|[\s_-])/i.test(String(el.className || ""))) return false;
@@ -1193,6 +1217,9 @@
     if (!el || uploadControl(el)) { if (record) record.blocked = "upload-control"; return false; }
     const panel = document.getElementById("resume-autofill-page-action");
     const pointerEvents = panel?.style.pointerEvents;
+    let delivered = false;
+    const observe = event => { if (event.target === el || el.contains(event.target)) delivered = true; };
+    document.addEventListener('click', observe, true);
     // Our review overlay must not intercept native clicks on page controls.
     if (panel) panel.style.pointerEvents = "none";
     try {
@@ -1214,9 +1241,6 @@
         }
         const rect = el.getBoundingClientRect();
         if (record) record.rect = { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
-        let delivered = false;
-        const observe = event => { if (event.target === el || el.contains(event.target)) delivered = true; };
-        document.addEventListener("click", observe, true);
         try {
           const point = hitPoint();
           const result = point ? await chrome.runtime.sendMessage({ type: "RESUME_AUTOFILL_TRUSTED_CLICK", ...point, plain: plainTrusted }) : { clicked: false, reason: "target-not-at-point" };
@@ -1225,7 +1249,6 @@
           if (result?.clicked && (changed ? await waitFor(changed, 800) : delivered)) return true;
           if (result?.clicked && !delivered && record) { record.trusted = false; record.trustedError = "trusted-click-not-observed"; }
         } catch (error) { if (record) record.trustedError = String(error?.message || error); }
-        finally { document.removeEventListener("click", observe, true); }
       }
       if (record) record.fallback = true;
       const rect = el.getBoundingClientRect();
@@ -1239,7 +1262,11 @@
       if (typeof el.click === "function") el.click();
       else el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       return true;
-    } finally { if (panel) panel.style.pointerEvents = pointerEvents; }
+    } finally {
+      document.removeEventListener('click', observe, true);
+      if (record) record.delivered = delivered;
+      if (panel) panel.style.pointerEvents = pointerEvents;
+    }
   };
   const selectionTarget = (option) => {
     let treeNode = option?.closest?.("[role=treeitem], [class*='tree__node'], [class*='tree-node'], [class*='TreeNode']")
@@ -1411,7 +1438,7 @@
     try {
     // Disabled dependent inputs still belong to the form; never try to write them.
     const controls = [...new Set([...fields(), ...document.querySelectorAll("input:disabled, select:disabled, textarea:disabled, input[aria-disabled=true]")])]
-      .filter((el) => !uploadControl(el) && (editable(el) || visible(el) && !["hidden", "password", "file"].includes(el.type) && !!fieldTitle(el)));
+      .filter((el) => !uploadControl(el) && !rangeSeparator(el) && (editable(el) || visible(el) && !["hidden", "password", "file"].includes(el.type) && !!fieldTitle(el)));
     const moduleRows = new Map();
     for (const [key, saved] of fieldHandles) if (!saved.el.isConnected) resolveField(key);
     const metadata = controls.map((el, index) => {
@@ -1453,6 +1480,8 @@
           : languagePeers.filter(field => /^(?:语言考试|英语等级)[＊*]?$/.test(field.label)).at(-1)?.el : null;
       const parentChoice = educationParent || gpaParent || languageParent || (isChoiceControl(el) && /名称/.test(label) && row
         ? metadata.filter((field) => field.index < index && row.contains(field.el) && isChoiceControl(field.el) && /类型|类别/.test(field.label)).at(-1)?.el : null);
+      const dateField = /时间|日期|年月|date|month/i.test(`${label} ${el.type || ''}`);
+      const range = dateField ? fullDateRange(el) : [];
       return {
         key, index,
         label: label.slice(0, 160), labels: associatedLabels(el).slice(0, 3).map((value) => value.slice(0, 100)),
@@ -1463,6 +1492,10 @@
         required: !!el.required || el.getAttribute("aria-required") === "true", role: el.getAttribute("role") || "",
         isChoice: isChoiceControl(el),
         blocked: !!el.disabled || el.getAttribute("aria-disabled") === "true",
+        structure: { tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', inputType: el.type || '', readOnly: !!el.readOnly,
+          autocomplete: isAutocompleteControl(el), searchable: isSearchableChoiceInput(el),
+          rangeCount: range.length, rangeIndex: range.indexOf(el), datePartCount: dateField && !range.length ? dateControls(el).length : 0,
+          fieldControlCount: fieldContainer(el)?.querySelectorAll(controlSelector).length || 0 },
         constraints: { maxLength: el.maxLength >= 0 ? el.maxLength : undefined, pattern: el.pattern || "", min: el.min || "", max: el.max || "", step: el.step || "" },
         gpaScaleValue: row && /GPA|绩点/i.test(label) ? controlValue([...row.querySelectorAll(controlSelector)].find(control => /GPA.*(?:类型|BASE)|绩点.*(?:类型|满分|制式)|满绩/i.test(fieldTitle(control)))) : "",
         examValue: /外语等级|考试分数/.test(label) ? controlValue(languageParent) : "",
@@ -1518,12 +1551,23 @@
     return picker ? [...picker.querySelectorAll(":scope > .atsx-date-picker-period-month-label")] : [];
   };
   const datePartText = (el) => clean(el?.getAttribute?.("placeholder") || el?.getAttribute?.("aria-label")).toLowerCase();
-  const isYearPart = (el) => /年|year|yyyy/.test(datePartText(el));
+  const isYearPart = (el) => /年|year|yyyy/.test(datePartText(el)) && !/月|日|month|day|mm|dd/.test(datePartText(el));
   const isMonthPart = (el) => /^(?:月(?:份)?|month|mm|请选择月(?:份)?|选择月(?:份)?)$/i.test(datePartText(el));
-  const fullDateRange = (target) => {
-    const range = target?.closest?.("[class*='picker'][class*='range'], [class*='date-editor'][class*='range']");
-    const inputs = [...(range?.querySelectorAll("input") || [])].filter(visible);
-    return inputs.length === 2 && inputs.every((input) => /日期|时间|开始月|结束月|date|time|start.*month|end.*month/i.test(input.placeholder) && !isYearPart(input) && !isMonthPart(input)) ? inputs : [];
+  const fullDateRange = (target, caption = '') => {
+    const box = fieldContainer(target);
+    for (let range = target?.parentElement, depth = 0; range && depth < 16; range = range.parentElement, depth++) {
+      const explicit = range.matches("[class*='picker'][class*='range'], [class*='date-editor'][class*='range'], [class*='date-range'], [class*='dateRange']");
+      if (explicit || range === box) {
+        const all = [...range.querySelectorAll('input')].filter(input => visible(input) && input.type !== 'hidden');
+        const separator = all.some(rangeSeparator) || /[~～至—–-]/.test(clean(range.textContent));
+        const inputs = all.filter(input => !rangeSeparator(input));
+        const title = typeof caption === 'string' && caption || labelCaption(box?.querySelector(`${fieldLabelSelector}, label`));
+        const rangeHint = explicit || /时间|日期|年月|date|month/i.test(title) && (separator || inputs.every(input => ['date','month'].includes(input.type)));
+        if (rangeHint && inputs.length === 2 && inputs.includes(target) && inputs.every(input => !isYearPart(input) && !isMonthPart(input))) return inputs;
+      }
+      if (range === box) break;
+    }
+    return [];
   };
   const dateControls = (target) => {
     if (fullDateRange(target).includes(target)) return [];
@@ -1743,7 +1787,12 @@
           return Number(priorDatePopups.has(a)) - Number(priorDatePopups.has(b)) || popupDistance(a) - popupDistance(b);
         }).slice(0, 1);
         const exactText = (node) => clean(node?.innerText || node?.textContent || node?.getAttribute?.("aria-label") || node?.getAttribute?.("title") || node?.getAttribute?.("data-value") || node?.getAttribute?.("value"));
-        const dateText = (node) => exactText(node).replace(/\s/g, "").replace(/^(一|二|三|四|五|六|七|八|九|十|十一|十二)月$/, (_match, month) => `${["一","二","三","四","五","六","七","八","九","十","十一","十二"].indexOf(month) + 1}月`);
+        const dateText = (node) => {
+          const text = exactText(node).replace(/\s/g, "").replace(/^(一|二|三|四|五|六|七|八|九|十|十一|十二)月$/, (_match, month) => `${["一","二","三","四","五","六","七","八","九","十","十一","十二"].indexOf(month) + 1}月`);
+          const month = ['data-value', 'title', 'aria-label'].map(name => clean(node?.getAttribute?.(name)))
+            .find(value => /^\d{4}-(?:0[1-9]|1[0-2])$/.test(value) && Number(value.slice(-2)) === Number(text));
+          return /^\d{1,2}$/.test(text) && month ? `${Number(text)}月` : text;
+        };
         const exactNodes = (scope, pattern) => [...scope.querySelectorAll("*")].filter((node) => {
           const text = dateText(node);
           return visible(node) && pattern.test(text) && ![...node.children].some((child) => visible(child) && dateText(child) === text);
@@ -1839,10 +1888,17 @@
           }
           const direction = targetYear < currentYear ? "prev" : "next";
           const pickerNodes = () => { const panel = liveMonthPanel(); return [...new Set([panel, ...(panel?.querySelectorAll("*") || []), ...popupNodes()])].filter(visible); };
-          const yearButton = () => [...new Set([...(liveMonthPanel()?.querySelectorAll("a, button, [role=button]") || []), ...popupNodes().filter(node => node.matches("button, [role=button]"))])].find((el) => {
-            const hint = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${el.className || ""}`;
-            return new RegExp(`${direction}.*year|super-${direction}|(?:d-)?arrow-${direction === "prev" ? "left" : "right"}|${direction === "prev" ? "left" : "right"}-switcher`, "i").test(hint);
-          });
+          const yearButton = () => {
+            const buttons = [...new Set([...(liveMonthPanel()?.querySelectorAll("a, button, [role=button]") || []), ...popupNodes().filter(node => node.matches("button, [role=button]"))])]
+              .filter(el => !el.disabled && el.getAttribute('aria-disabled') !== 'true');
+            const side = direction === 'prev' ? 'left' : 'right';
+            const explicit = buttons.find(el => new RegExp(`${direction}.*year|super-${direction}|(?:d-)?arrow-${side}|${side}-switcher`, 'i')
+              .test(`${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.className || ''}`));
+            if (explicit) return explicit;
+            const arrows = buttons.filter(el => [...el.querySelectorAll('[data-icon], svg[aria-label]')].some(icon => new RegExp(`\\b${side}\\b`, 'i')
+              .test(`${icon.getAttribute('data-icon') || ''} ${icon.getAttribute('aria-label') || ''}`.replace(/([a-z])([A-Z])/g, '$1 $2'))));
+            return arrows.length === 1 ? arrows[0] : null;
+          };
           const displayedYear = () => {
             if (yearTitle.isConnected && visible(yearTitle)) return Number(dateText(yearTitle).match(/^\d{4}/)?.[0]);
             const headers = exactNodes(liveMonthPanel(), /^\d{4}年?$/).filter(node => node.tagName === yearTitle.tagName && String(node.className) === String(yearTitle.className));
@@ -2099,7 +2155,8 @@
     }
     if (isLocationPicker) {
       const rawLocation = String(value).trim();
-      const location = rawLocation.match(/^(.+?(?:省|自治区|特别行政区|市))[\/／,，\s-]*(.+?(?:市|自治州|地区|盟|区|县))(?:[\/／,，\s-]*(.+?(?:区|县|市|旗)))?$/)
+      const regionLocation = rawLocation.replace(/^中国(?:大陆|内地)?[\/／,，\s\->]+/i, '');
+      const location = regionLocation.match(/^(.+?(?:省|自治区|特别行政区|市))[\/／,，\s-]*(.+?(?:市|自治州|地区|盟|区|县))(?:[\/／,，\s-]*(.+?(?:区|县|市|旗)))?$/)
         || (() => {
           const parts = rawLocation.replace(/^中国(?:大陆|内地)?[\/／,，\s\->]+/i, "").split(/[\/／,，、\s\->]+/).filter(Boolean);
           return parts.length >= 2 ? [rawLocation, parts[0], parts[1], parts[2] || ""] : null;
@@ -2286,10 +2343,18 @@
           return distance(left) - distance(right);
         })[0];
         const locationOptions = () => [...new Set([...options(), ...(popup?.querySelectorAll(treeRows) || []), ...(locationTree()?.querySelectorAll(treeRows) || [])])].filter(visible);
-        const locationText = (el) => clean(el?.querySelector?.(treeLabel)?.textContent || el?.textContent);
+        const locationText = (el) => {
+          const text = el?.querySelector?.(treeLabel)?.textContent;
+          if (text) return clean(text);
+          const copy = el?.cloneNode(true);
+          copy?.querySelectorAll('button, input, [role=button], [role=group], [role=treeitem]').forEach(node => node.remove());
+          return clean(copy?.textContent);
+        };
         const treeRow = el => el.closest(treeRows) || el;
+        const orderedTreeRows = () => [...new Set(locationOptions().map(treeRow))]
+          .sort((left, right) => left === right ? 0 : left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
         const cascadeColumn = el => el?.closest("[class*='cascader-menu'][role=menu], div[class~='el-cascader-menu']") || el?.closest("ul[class*='cascader-menu']");
-        const treeLevel = el => el?.style.getPropertyValue("--ihr-tree-item-level") || String(el?.querySelectorAll("[class*='indent']").length || 0);
+        const treeLevel = el => el?.getAttribute('aria-level') || el?.style.getPropertyValue("--ihr-tree-item-level") || String(el?.querySelectorAll("[class*='indent']").length || 0);
         const liveTreeItem = (item) => {
           if (!item || item.isConnected) return item;
           const key = item.getAttribute("data-tree-key") || item.getAttribute("data-virtual-key");
@@ -2299,16 +2364,16 @@
           return matches.length === 1 ? matches[0] : null;
         };
         const treeItem = (name, parent) => {
-          const items = [...new Set(locationOptions().map(treeRow))];
+          const items = orderedTreeRows();
           if (parent) { parent = liveTreeItem(parent); if (!parent) return null; }
-          const virtual = parent && (parent.matches(".ihr_tree-item") && parent.style.getPropertyValue("--ihr-tree-item-level") !== "" || rolelessTree && parent.querySelector(treeLabel));
+          const virtual = parent && (parent.hasAttribute('aria-level') || parent.matches(".ihr_tree-item") && parent.style.getPropertyValue("--ihr-tree-item-level") !== "" || rolelessTree && parent.querySelector(treeLabel));
           const level = Number(treeLevel(parent));
           const afterParent = items.indexOf(parent) + 1;
           const column = cascadeColumn(parent);
           const childColumn = column?.nextElementSibling;
           const end = virtual ? items.findIndex((el, index) => index >= afterParent && Number(treeLevel(el)) <= level) : -1;
           const matches = items.filter((el, index) => sameArea(locationText(el), name)
-            && (!parent || (column ? childColumn?.contains(el) : parent.contains(el) || virtual && index >= afterParent && (end < 0 || index < end) || !virtual && !parent.matches("[role=treeitem]"))));
+            && (!parent || el !== parent && (column ? childColumn?.contains(el) : parent.contains(el) || virtual && index >= afterParent && (end < 0 || index < end) || !virtual && !parent.matches("[role=treeitem]"))));
           return matches.length === 1 ? matches[0] : null;
         };
         const findTreeItem = async (name, parent) => {
@@ -2334,12 +2399,12 @@
         const expandTreeItem = async (item) => {
           item = liveTreeItem(item);
           if (!item) return false;
-          const switcher = item?.querySelector?.(".atsx-tree-switcher, [data-cy=switcher], .ihr_tree-item_status, button[class*='expand'], button[class*='switcher']");
+          const switcher = item?.querySelector?.(".atsx-tree-switcher, [data-cy=switcher], .ihr_tree-item_status, [class*='expand'], [class*='switcher'], button[aria-label*='展开'], button[aria-label*='expand' i]");
           const opened = () => {
             const current = liveTreeItem(item), currentSwitcher = current?.querySelector(".atsx-tree-switcher, [data-cy=switcher], .ihr_tree-item_status");
             const column = cascadeColumn(current);
             if (column) return /(?:^|[\s_-])active(?:$|[\s_-])/.test(String(current.className)) && !!column.nextElementSibling?.querySelector("[role=menuitem], li");
-            const rows = [...new Set(locationOptions().map(treeRow))], next = rows[rows.indexOf(current) + 1];
+            const rows = orderedTreeRows(), next = rows[rows.indexOf(current) + 1];
             return rolelessTree && current && next && Number(treeLevel(next)) > Number(treeLevel(current))
               || current?.getAttribute("aria-expanded") === "true" || /(?:^|[\s_-])expand(?:ed)?(?:$|[\s_-])/.test(String(current?.className || "")) || (currentSwitcher ? /(?:^|[_-])open\b/.test(String(currentSwitcher.className || "")) : [...(current?.querySelectorAll("[role=group]") || [])].some(visible));
           };
@@ -2361,9 +2426,9 @@
           setSearchValue(search, areaName(location?.[2] || rawLocation));
           await waitFor(() => location ? treeItem(location[flatCity ? 2 : 1]) : treeItem(rawLocation), 1600);
         }
-        const mainland = location && treeItem("中国大陆");
+        const mainland = location && (treeItem(/^中国[\/／,，\s\->]/.test(rawLocation) ? '中国' : '中国大陆') || treeItem('中国'));
         if (mainland) await expandTreeItem(mainland);
-        const province = flatCity ? await findTreeItem(location[2]) : location && await findTreeItem(location[1], rolelessTree ? mainland : undefined);
+        const province = flatCity ? await findTreeItem(location[2]) : location && await findTreeItem(location[1], mainland || undefined);
         if (province || rolelessTree && !location) {
           let leaf = province || await findTreeItem(rawLocation);
           const path = location ? location.slice(flatCity ? 2 : 1).filter(Boolean) : [];
@@ -2767,59 +2832,70 @@
 
   let rowAddDiagnostics = [];
   async function addRows(label, count, anchor, buttonPatterns = [], section = "") {
-    if ([...document.querySelectorAll('input[type=checkbox], [role=checkbox]')].some((el) =>
-      (el.checked || el.getAttribute("aria-checked") === "true") && inSection(el, section)
-      && /没有.*(?:经历|经验|成果)|无.*(?:经历|经验)/.test(associatedLabels(el).join(" ") || el.closest("label")?.textContent || ""))) return 0;
+    const started = Date.now();
+    let clicks = 0, initial = 0, existing = 0, ownedRows = [];
+    const finish = (reason, extra = {}) => {
+      if (count > initial) rowAddDiagnostics.push({ label, section, anchor, stage: 'rows', reason, requested: count, initial, final: existing, clicks, durationMs: Date.now() - started, ...extra });
+      return existing;
+    };
     const countFields = () => {
-      const matches = fields().filter((el) => anchorMatch(el, anchor));
-      const scoped = matches.filter((el) => inSection(el, section));
-      const sectionNames = [section, ...(SECTION_ALIASES[section] || [])].map(normalize);
       const atsxRows = section ? [...document.querySelectorAll(".createFormSection-repeatable")]
-        .filter((node) => { const title = normalize(node.querySelector(".createFormSection-text")?.textContent); return sectionNames.some((name) => name && title.includes(name))
+        .filter((node) => { const title = normalize(node.querySelector(".createFormSection-text")?.textContent); return matchesSection(title, section)
           && (!["获奖经历", "竞赛", "荣誉"].includes(section) || awardModule(title) === section); })
         .reduce((total, node) => Math.max(total, node.querySelectorAll(".resumeEditForm-item").length), 0) : 0;
-      const owned = ["竞赛", "荣誉"].includes(section) ? scoped : section ? scoped.length ? scoped : matches.filter((el) => !hasKnownSection(sectionTitle(el))) : matches;
-      return Math.max(atsxRows, rowContainers(anchor, section).length, new Set(owned.map((el) => repeatedContainer(el, anchor, section))).size);
+      ownedRows = rowContainers(anchor, section);
+      return Math.max(atsxRows, ownedRows.length);
     };
     const buttonInSection = (el) => {
       if (!section) return true;
       if (anchor === "语言类型" && languageCategoryButton(el)) return true;
       if (["获奖经历", "竞赛", "荣誉"].includes(section) && !inSection(el, section)) return false;
-      const sectionNames = [section, ...(SECTION_ALIASES[section] || [])].map(normalize);
       const title = normalize(sectionTitle(el));
-      return !hasKnownSection(title) || sectionNames.some((name) => title.includes(name));
+      return !title || matchesSection(title, section) || !hasKnownSection(title) && ownedRows.some(row => row.contains(el));
     };
-    let existing = countFields();
+    initial = existing = countFields();
+    if (existing >= count) return existing;
+    if ([...document.querySelectorAll('input[type=checkbox], [role=checkbox]')].some((el) =>
+      (el.checked || el.getAttribute("aria-checked") === "true") && inSection(el, section)
+      && /没有.*(?:经历|经验|成果)|无.*(?:经历|经验)/.test(associatedLabels(el).join(" ") || el.closest("label")?.textContent || ""))) return finish('record-add-opted-out');
     // Existing controls without a recognized row anchor have ambiguous ownership.
-    if (!existing && section && fields().some((el) => !el.matches('input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]') && hasKnownSection(sectionTitle(el)) && inSection(el, section))) return 0;
-    let clicks = 0;
+    const sectionFields = fields().filter(el => !el.matches('input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]') && hasKnownSection(sectionTitle(el)) && inSection(el, section));
+    if (!existing && section && sectionFields.length) return finish('record-anchor-not-found', { fields: [...document.querySelectorAll(controlSelector)]
+      .filter(el => visible(el) && !uploadControl(el) && !['hidden', 'password', 'file'].includes(el.type) && !el.closest('nav, [role=navigation], [role=listbox], [role=tree], [role=menu]') && hasKnownSection(sectionTitle(el)) && inSection(el, section))
+      .slice(0, 12).map(el => ({ label: identityLabel(el), tag: el.tagName.toLowerCase(), type: controlType(el), inputType: el.type || '', role: el.getAttribute('role') || '', readOnly: !!el.readOnly, disabled: !!el.disabled, included: editable(el) })) });
     while (existing < count && clicks < count * 2) {
       const wanted = normalize(label);
-      const sectionNames = [section, ...(SECTION_ALIASES[section] || [])].map(normalize);
       const atsxSection = [...document.querySelectorAll(".createFormSection-repeatable")].find((node) => {
         const title = normalize(node.querySelector(".createFormSection-text")?.textContent);
-        return sectionNames.some((name) => name && title.includes(name))
+        return matchesSection(title, section)
           && (!["获奖经历", "竞赛", "荣誉"].includes(section) || awardModule(title) === section);
       });
       // Repeated Phoenix modules expose a stable module-id + _addButton pair.
       // Resolve that first so a deeply nested page cannot select another module.
       const moduleField = fields().find((el) => anchorMatch(el, anchor) && inSection(el, section))
-        || (!["竞赛", "荣誉"].includes(section) && fields().find((el) => anchorMatch(el, anchor) && !hasKnownSection(sectionTitle(el))));
+        || (!["竞赛", "荣誉"].includes(section) && fields().find((el) => anchorMatch(el, anchor) && !sectionTitle(el)));
       let directButton = null;
       for (let node = moduleField; node && !directButton; node = node.parentElement) {
         if (node.id) directButton = document.getElementById(`${node.id}_addButton`);
       }
       const atsxButton = atsxSection?.querySelector(".createFormSection-addBtn, .formOperate-addBtn");
-      const button = atsxButton && visible(atsxButton) ? atsxButton : directButton && visible(directButton) && buttonInSection(directButton) ? directButton : [...document.querySelectorAll("[id$='_addButton'], button, a, [role=button], [class*='add'], [class*='Add'], div, span")].find((el) => {
-        if (!visible(el) || uploadControl(el) || el.disabled || el.getAttribute("aria-disabled") === "true" || el.closest("[data-resume-autofill-ui]")) return false;
-        const text = normalize(el.textContent);
+      const candidates = [...new Set([...document.querySelectorAll("[id$='_addButton'], button, a, [role=button], [class*='add'], [class*='Add'], [class*='plus'], [class*='Plus'], [data-icon], div, span")]
+        .map(el => el.closest('button, a, [role=button]') || el))].filter((el) => {
+        if (!visible(el) || uploadControl(el) || el.closest("[data-resume-autofill-ui], nav, [role=navigation], [role=listbox], [role=tree], [role=menu]")) return false;
+        const text = normalize(buttonCaption(el));
         if (text.length > 40 || el.querySelector(controlSelector) || el.matches("div, span") && (!/^(?:添加|新增|\+|＋)/.test(text) || [...el.children].some((child) => normalize(child.textContent) === text || /^(?:添加|新增)/.test(normalize(child.textContent))))) return false;
-        const specific = text.includes(wanted) || buttonPatterns.some((pattern) => pattern.test(text));
-        const genericInSection = /^(?:添加|新增|\+|＋)$/.test(text) && sectionNames.some((name) => name && normalize(sectionTitle(el)).includes(name));
+        const specific = /添加|新增|[+＋]/.test(text) && (text.includes(wanted) || buttonPatterns.some((pattern) => pattern.test(text)));
+        const genericInSection = /^(?:添加|新增|\+|＋)$/.test(text) && (matchesSection(sectionTitle(el), section) || ownedRows.some(row => row.contains(el)));
         return buttonInSection(el) && (specific || genericInSection);
-      });
-      if (!button || uploadControl(button)) break;
-      await clickOption(button, true, () => countFields() > existing);
+      }).filter((el, _index, all) => !all.some(owner => owner !== el && owner.contains(el)));
+      const direct = [atsxButton, directButton].find(button => button && visible(button) && buttonInSection(button) && !uploadControl(button));
+      const enabled = (button) => !button.disabled && button.getAttribute('aria-disabled') !== 'true';
+      const usable = candidates.filter(enabled);
+      const button = direct && enabled(direct) ? direct : usable.length === 1 ? usable[0] : null;
+      if (!button) return finish(usable.length > 1 ? 'record-add-owner-ambiguous' : candidates.length || direct ? 'record-add-disabled' : 'record-add-button-not-found',
+        { candidates: candidates.slice(0, 8).map(el => ({ label: buttonCaption(el).slice(0, 40), module: sectionTitle(el), enabled: enabled(el) })) });
+      const click = {};
+      await clickOption(button, true, () => countFields() > existing, click);
       clicks++;
       const next = await waitFor(() => {
         const current = countFields();
@@ -2827,12 +2903,12 @@
       }, 1800);
       if (!next) {
         const saveRequired = [...document.querySelectorAll('[role=alert], [class*="message"], [class*="toast"], [class*="notification"]')].some(el => visible(el) && /请先保存|保存.*(?:后|再).*(?:添加|新增)|未保存/.test(clean(el.textContent)));
-        rowAddDiagnostics.push({ label, section, stage: "interaction", reason: saveRequired ? "record-add-save-required" : "record-add-not-confirmed" });
-        break;
+        const validation = [...document.querySelectorAll('[role=alert], [class*="feedback"], [class*="error"]')].some(el => visible(el) && /必填|不能为空|请先(?:完成|填写)|required|invalid/i.test(clean(el.textContent)));
+        return finish(saveRequired ? 'record-add-save-required' : validation ? 'record-add-validation-failed' : !click.delivered ? 'record-add-click-not-delivered' : 'record-add-not-confirmed', { button: buttonCaption(button).slice(0, 40), module: sectionTitle(button), click: { trusted: click.trusted === true, fallback: click.fallback === true, delivered: click.delivered === true } });
       }
       existing = next;
     }
-    return existing;
+    return finish(existing >= count ? 'record-added' : 'record-add-limit');
   }
 
   async function prepareProfile(profile, corrections = []) {
@@ -2933,9 +3009,9 @@
         && (isSuggestionControl(field) || isChoiceControl(field)
           && /期望从事行业|期望行业|意向行业|期望从事职业|期望职业|意向职位|(?:职位|职业|岗位)(?:类别|类型)/.test(hint));
     };
-    const hasSection = (section) => moduleTitles().some((text) => [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some((name) => normalize(text).includes(name))) || fields().some((el) => {
+    const hasSection = (section) => moduleTitles().some((text) => matchesSection(text, section)) || fields().some((el) => {
       const title = normalize(sectionTitle(el));
-      return title && [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some((name) => title.includes(name));
+      return title && matchesSection(title, section);
     }) || [...document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, [role=heading], [class*='title'], [class*='Title'], .createFormSection-text")].some((el) => {
       const title = normalize(clean(el.innerText || el.textContent));
       return [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some((name) => title === name);
@@ -2992,7 +3068,7 @@
     const highestRows = (profile.education || []).filter((row) => degreeRank(row?.degree) > 0 && degreeRank(row.degree) === degreeRank(highestDegree));
     for (const [label, key] of [["最高学历学校", "school"], ["最高学历专业", "major"], ["最高学历毕业日期", "end"], ["预计毕业时间", "end"], ["毕业学校", "school"], ["毕业院校", "school"], ["毕业学院", "college"], ["毕业院系", "college"], ["毕业学校专业", "major"], ["毕业专业", "major"], ["毕业时间", "end"], ["学习形式", "training"]]) {
       const targets = fields().filter((field) => normalize(fieldTitle(field).replace(/[＊*]/g, "")) === normalize(label)
-        && (!["毕业时间", "学习形式"].includes(label) || !/教育|学历/.test(moduleTitle(field))));
+        && !/教育(?:背景|经历)|学历经历/.test(moduleTitle(field)));
       if (!targets.length) continue;
       const detail = { key: targets.length === 1 ? rememberField(targets[0]) : "", label, section: "最高学历", row: 1 };
       if (targets.length !== 1 || highestRows.length !== 1) {
@@ -3041,7 +3117,7 @@
     const honors = /竞赛|大赛|比赛/.test(awardTitles)
       ? (profile.awards || []).filter(item => !competitionAward(item))
       : (profile.awards || []);
-    diagnostics.rows = await ensureRows({ education: profile.education?.length, languages: profile.languages?.length, work: workRows.length, internships: internshipRows.length, projects: profile.projects?.length, cadres: profile.cadres?.length, englishCertificates: englishCertificates.length, certificates: certificates.length, skills: profile.skills?.length, awards: profile.awards?.length, competitions: competitions.length, honors: honors.length });
+    if (!options.rowsPrepared) diagnostics.rows = await ensureRows({ education: profile.education?.length, languages: profile.languages?.length, work: workRows.length, internships: internshipRows.length, projects: profile.projects?.length, cadres: profile.cadres?.length, englishCertificates: englishCertificates.length, certificates: certificates.length, skills: profile.skills?.length, awards: profile.awards?.length, competitions: competitions.length, honors: honors.length });
     const describeTarget = (field, method) => field ? {
       method, label: fieldTitle(field) || labelText(field), element: field.tagName.toLowerCase(), module: moduleTitle(field),
       repeatIndex: repeatIndex(field, fieldTitle(field) || labelText(field)), currentValue: controlValue(field), targetIndex: fields().indexOf(field)
@@ -3055,7 +3131,6 @@
     }
     const certificateMapping = [["证书名称", "name"], ["分数", "_score"], ["获得时间", "date"], ["证书描述", "description"]];
     const alignRows = (sourceRows, mapping, anchor, section) => {
-      const remaining = [...(sourceRows || [])];
       const key = mapping.find(([label]) => label === anchor)?.[1];
       const matched = rowContainers(anchor, section).map((container) => {
         const field = [...(container.matches?.(controlSelector) ? [container] : []), ...container.querySelectorAll(controlSelector)]
@@ -3067,13 +3142,14 @@
         const matches = (sourceRows || []).filter(row => {
           const expected = row?.[key];
           if (descriptionBinding) return clean(row.description) === description;
-          return anchor === "证书名称" && certificateExam(actual) && certificateExam(expected)
+          const nameMatches = anchor === "证书名称" && certificateExam(actual) && certificateExam(expected)
             ? certificateExam(actual) === certificateExam(expected) : anchor === "语言类型" ? languageToken(actual) === languageToken(expected) : normalize(actual) === normalize(expected);
+          return nameMatches || anchor === "获奖项" && isChoiceControl(field) && description && clean(row.description) === description;
         });
-        const index = matches.length === 1 ? remaining.indexOf(matches[0]) : -1;
-        return index >= 0 ? remaining.splice(index, 1)[0] : null;
+        return matches.length === 1 ? matches[0] : null;
       });
-      return [...matched.map((row) => row === undefined ? remaining.shift() : row), ...remaining];
+      const remaining = (sourceRows || []).filter(row => !matched.includes(row));
+      return [...matched.map(row => row === undefined ? remaining.shift() : row && matched.filter(other => other === row).length > 1 ? null : row), ...remaining];
     };
     const groups = [
       [profile.education, [["学历类型", "training"], ["学历", "degree"], ["学校名称", "school"], ["学校所在城市", "location"], ["学院名称", "college"], ["专业名称", "major"], ["开始时间", "start"], ["结束时间", "end"], ["GPA类型", "gpaType"], ["GPA", "gpa"], ["成绩排名", "rank"]], "学校名称", "教育背景"],
@@ -3202,7 +3278,9 @@
         confirmed: !!field && (/日期|时间/.test(label) && dateParts(value).length >= 2 ? dateValueMatches(field, value) : valueMatches(controlValue(field), value, label)) };
     });
     diagnostics.confirmedEmpty = diagnostics.emptyTargets.filter((target) => target.confirmed).length;
-    const result = { filled, missing: missing + structuredMissing, filledFields, missingFields, skippedFields, diagnostics };
+    const confirmedKeys = new Set(diagnostics.emptyTargets.filter(target => target.confirmed).map(target => target.key));
+    const result = { filled, missing: missing + structuredMissing, filledFields, missingFields, skippedFields, diagnostics,
+      targets: [...expectedEmpty].filter(([key]) => confirmedKeys.has(key)).map(([key, target]) => ({key, ...target})) };
     console.info("[resume-autofill] structured-fill", { filled, missing: result.missing, skipped: skippedFields.length });
     return result;
   }
@@ -3228,10 +3306,10 @@
     panel.id = "resume-autofill-page-action";
     panel.dataset.resumeAutofillUi = "true";
     panel.dataset.contentProtocol = String(CONTENT_PROTOCOL);
-    panel.dataset.contentBuild = "100-virtual-city-committed-input";
+    panel.dataset.contentBuild = "100-add-entry-owner";
     panel.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 32px);box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;gap:8px;padding:12px;background:white;color:#173e30;border:1px solid #b5d8c7;border-radius:10px;font:14px system-ui;box-shadow:0 4px 18px #0002";
     if (typeof visible === "boolean") panel.dataset.pageActionVisible = String(visible);
-    if (panel.dataset.pageActionVisible === "false") panel.style.display = "none";
+    if (panel.dataset.pageActionVisible !== "true") panel.style.display = "none";
     if (!result && existing?.dataset.contentInstance === scanId && existing.querySelector("button")?.disabled) return { shown: true, protocol: CONTENT_PROTOCOL };
     if (!result && existing?.dataset.contentInstance === scanId && existing.querySelector("details[data-section=diagnostics]") && existing.querySelector("details[data-section=review]")) return { shown: true, protocol: CONTENT_PROTOCOL };
     panel.dataset.contentInstance = scanId;
@@ -3336,6 +3414,7 @@
       PREPARE_PROFILE: () => prepareProfile(message.profile, message.corrections),
       FILL_PROFILE: () => fill(message.profile, message.options),
       APPLY_ASSIGNMENTS: () => applyAssignments(message.assignments),
+      VERIFY_TARGETS: () => ({ targets: verifyTargets(message.targets) }),
       LOCATE_FIELD: () => locateField(message.key, message.locator),
       SHOW_PAGE_ACTION: () => showPageAction(message.result, message.visible)
     };
