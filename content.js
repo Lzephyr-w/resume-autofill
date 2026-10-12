@@ -1,16 +1,47 @@
 (() => {
   const CONTENT_PROTOCOL = 100;
+  const CONTENT_BUILD = "100-tree-child-load";
   if ((globalThis.__resumeAutofillContentProtocol || 0) > CONTENT_PROTOCOL) return;
   if (globalThis.__resumeAutofillContentListener) globalThis.chrome?.runtime?.onMessage?.removeListener(globalThis.__resumeAutofillContentListener);
   globalThis.__resumeAutofillContentProtocol = CONTENT_PROTOCOL;
-  document.getElementById("resume-autofill-page-action")?.setAttribute("data-content-build", "100-add-entry-owner");
+  document.getElementById("resume-autofill-page-action")?.setAttribute("data-content-build", CONTENT_BUILD);
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
-  const rangeSeparator = el => el?.tagName === 'INPUT' && (el.readOnly || el.disabled || el.getAttribute('aria-hidden') === 'true')
-    && /^[~～至—–-]$/.test(clean(el.value || el.placeholder || el.getAttribute('aria-label')));
+  const rangeSeparator = el => {
+    if (el?.tagName !== 'INPUT') return false;
+    const marker = clean(el.value || el.getAttribute('aria-label') || el.placeholder);
+    if (marker && !/^[~～至—–-]$/.test(marker)) return false;
+    if (el.readOnly || el.disabled || el.getAttribute('aria-hidden') === 'true') return !!marker;
+    for (let node = el.parentElement, depth = 0; node && depth < 16; node = node.parentElement, depth++) {
+      const inputs = [...node.querySelectorAll('input')].filter(input => visible(input) && input.type !== 'hidden');
+      if (inputs.length > 3) break;
+      if (inputs.length !== 3 || inputs[1] !== el || ![inputs[0], inputs[2]].every(input => input.readOnly || ['date','month'].includes(input.type))) continue;
+      if (marker) return true;
+      // A blank separator can render its glyph beside the input; keep ordinary or named fields.
+      const captions = [...new Set([...node.querySelectorAll(`${fieldLabelSelector}, label`), precedingFieldCaption(el)].filter(label => label && !label.contains(el) && !label.querySelector(controlSelector)).map(label => normalize(labelCaption(label)).replace(/^[＊*]+|[＊*]+$/g, '')).filter(Boolean))];
+      if (captions.length === 1 && /时间|日期|年月|date|month/i.test(captions[0]) && /[~～至—–-]/.test(clean(node.textContent))) return true;
+    }
+    return false;
+  };
   const visible = (el) => {
     if (!el || getComputedStyle(el).visibility === "hidden") return false;
     const rect = el.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
+  };
+  const compositeDateInputs = el => {
+    if (el?.tagName !== 'INPUT') return [];
+    // ponytail: one local text proxy plus its full-date picker, never separate fields or year/month parts.
+    for (let node = el.parentElement, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
+      const inputs = [...node.querySelectorAll('input')].filter(input => visible(input) && input.type !== 'hidden');
+      if (inputs.length > 2 || node.matches('form, section, fieldset')) break;
+      if (inputs.length !== 2 || !inputs.includes(el) || !/date|month|calendar|picker/i.test(String(node.className))
+        || /range/i.test(String(node.className)) || /^[~～至—–-]$/.test(clean(node.textContent))) continue;
+      const proxy = inputs.find(input => !input.readOnly && input.type === 'text');
+      const picker = inputs.find(input => input.readOnly && /date|month|calendar|picker/i.test(String(input.className)));
+      if (proxy && picker && !inputs.some(input => input.matches('[role=combobox], [aria-haspopup]') || isYearPart(input) || isMonthPart(input)
+          || input.getAttribute('aria-label') && !/时间|日期|年月|date|month/i.test(input.getAttribute('aria-label')))
+        && /y{4}\s*[-/年.]\s*m{2}/i.test(picker.placeholder) && !node.querySelector('label, [aria-labelledby]')) return [proxy, picker];
+    }
+    return [];
   };
   const captchaBlocking = () => [...document.querySelectorAll('iframe[src*="captcha"]')].some(el => {
     if (!visible(el)) return false;
@@ -49,9 +80,24 @@
   let schemaControls = null;
   const fields = () => schemaControls || [...document.querySelectorAll(controlSelector)]
     .filter(editable)
+    .filter(el => compositeDateInputs(el)[1] !== el)
+    .filter(el => !el.matches('input, textarea') || el.parentElement?.closest('[role=combobox]')?.querySelectorAll('input, textarea').length !== 1)
+    .filter(el => !el.matches('[role=checkbox]') || !el.querySelector('input[type=checkbox]'))
     .filter((el) => el.matches("input, textarea, select, [role], [aria-haspopup], [contenteditable='true']") || ![...el.querySelectorAll(controlSelector)].some(editable))
     .filter((el, index, all) => all.indexOf(el) === index);
   const normalize = (value) => clean(value).toLowerCase().replace(/[：:（）()\[\]【】／\/\s_-]/g, "");
+  const isCheckbox = el => !!el?.matches('input[type=checkbox], [role=checkbox]');
+  const checkboxChecked = el => el?.type === 'checkbox' ? el.checked : el?.getAttribute('aria-checked') === 'true';
+  const isFullTimeLabel = label => /^(?:(?:是否(?:为|属于)?)?全日制(?:学历|教育|学习)?|(?:is)?fulltime)$/.test(normalize(label).replace(/[＊*?？]/g, ''));
+  const fullTimeValue = value => /非全日制|非脱产|在职|函授|业余|网络教育|远程教育|自学考试|自考/.test(clean(value)) ? 'false'
+    : /全日制|全脱产|^脱产$/.test(clean(value)) ? 'true' : '';
+  const checkboxExpected = (value, label) => {
+    const token = normalize(String(value ?? ''));
+    if (/^(?:true|1|yes|是|有)$/.test(token)) return true;
+    if (/^(?:false|0|no|否|无)$/.test(token)) return false;
+    const state = isFullTimeLabel(label) ? fullTimeValue(value) : '';
+    return state ? state === 'true' : null;
+  };
   const salaryRange = (value) => {
     const text = clean(value).toLowerCase().replace(/\b\d{1,3}(?:[,，]\d{3})+(?!\d)/g, amount => amount.replace(/[,，]/g, ""));
     if (!text || /面议|保密|[,，]/.test(text) || /^[-−]/.test(text)) return null;
@@ -172,7 +218,18 @@
   console.assert(mergeDocumentChunks(["职责：\n负责开发\n亮点：", "亮点：\n1. 优化性能\n职责："]) === "职责：\n负责开发\n亮点：\n1. 优化性能\n职责：");
 
   const fieldLabelSelector = ".label, .form-item__title, .form-item__label, .formItem__label, .form-label, .field-label, legend, [class*='field-label'], [class*='field-item-label'], [class*='formily-item-label'], [class*='form-item-label'], [class*='form-item__label'], [class*='formItemLabel'], [class*='formItem__label'], [class^='title-'], [class*=' title-']";
+  const precedingFieldCaption = el => {
+    for (let node = choiceRoot(el) || el, depth = 0; node && node !== document.body && depth < 12; node = node.parentElement, depth++) {
+      if (node.matches('form, section, fieldset')) break;
+      const caption = node.previousElementSibling, text = labelCaption(caption);
+      if (caption && text && text.length <= 100 && !caption.matches(controlSelector) && !caption.querySelector(controlSelector)
+        && (caption.matches(`${fieldLabelSelector}, label`) || /[：:]$/.test(text))) return caption;
+    }
+    return null;
+  };
   const fieldContainer = (el) => {
+    const localCaption = precedingFieldCaption(el);
+    if (localCaption) return localCaption.parentElement;
     const explicit = el?.closest(".form-item, .form-group, .field, fieldset, [data-field]");
     if (explicit) return explicit;
     for (let node = el?.parentElement, depth = 0; node && depth < 12; node = node.parentElement, depth++) {
@@ -202,24 +259,44 @@
     return [...new Set(nodes)].map(labelCaption).filter(Boolean);
   };
   const buttonCaption = el => {
-    const caption = clean(el?.getAttribute('aria-label') || associatedLabels(el)[0] || el?.getAttribute('title') || el?.textContent);
+    const ariaLabel = clean(el?.getAttribute('aria-label'));
+    const caption = clean((/^(?:图标|icon)\s*[:：]\s*(?:plus|add)(?:[-_\s]|$)/i.test(ariaLabel) ? '' : ariaLabel) || associatedLabels(el)[0] || el?.getAttribute('title') || el?.textContent);
     if (caption) return caption;
     const icons = el?.matches('button, a, [role=button]') ? [el, ...el.querySelectorAll('[class], [data-icon], use')] : [el];
     return icons.some(icon => /(?:^|[\s_-])(?:plus|add)(?:$|[\s_-])/i.test(`${icon?.getAttribute('class') || ''} ${icon?.getAttribute('data-icon') || ''} ${icon?.getAttribute('href') || ''}`.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/#/g, ' '))) ? '+' : '';
   };
   const fieldTitle = (el) => {
+    if (isCheckbox(el)) {
+      const ownLabel = clean(el.getAttribute('aria-label')) || associatedLabels(el)[0];
+      if (ownLabel) return ownLabel.replace(/^[＊*]\s*|\s*[：:]$/g, '');
+    }
     const box = fieldContainer(el);
-    const label = [...(box?.querySelectorAll(`${fieldLabelSelector}, label`) || [])]
+    const label = precedingFieldCaption(el) || [...(box?.querySelectorAll(`${fieldLabelSelector}, label`) || [])]
       .find((node) => labelCaption(node) && !node.contains(el) && !node.querySelector(controlSelector));
     const groupedChoice = ["radio", "checkbox"].includes(el?.type) || ["radio", "checkbox"].includes(el?.getAttribute?.("role")) || el?.matches?.(".phoenix-radio-group");
     if (groupedChoice && box?.querySelectorAll("input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]").length > 1 && label) return clean(label.innerText || label.textContent || "");
-    if ((el?.type === "checkbox" || el?.getAttribute?.("role") === "checkbox") && associatedLabels(el)[0]) return associatedLabels(el)[0];
     // A selector's wrapping <label> contains its selected value, not its field caption.
-    if (label) {
-      const caption = labelCaption(label);
+    const associated = associatedLabels(el).find((text) => text.length <= 100);
+    if (label || associated) {
+      const declared = clean(el?.getAttribute('aria-label')) || (el?.hasAttribute('aria-labelledby') || el?.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`) ? associated : '');
+      const caption = clean(declared || labelCaption(label) || associated).replace(/^[＊*]\s*|\s*[：:]$/g, '');
       if (/时间|日期/.test(caption) && /^(?:请选择|请输入)?(?:开始|结束)(?:日期|时间|月)$/.test(el?.placeholder || "")) return el.placeholder.replace(/^(?:请选择|请输入)/, "").replace(/月$/, "时间");
       const range = /时间|日期|年月/.test(caption) ? fullDateRange(el, caption) : [];
       if (range.includes(el)) return range.indexOf(el) === 0 ? '开始时间' : '结束时间';
+      if (/^(?:大赛|竞赛|比赛)成绩[：:＊*]?$/.test(caption)) {
+        for (let node = box, depth = 0; node && depth < 3; node = node.parentElement, depth++) {
+          const controls = [...node.querySelectorAll('select, [role=combobox]')].filter(visible);
+          if (controls.length > 2) break;
+          if (controls.length === 2 && controls.includes(el)) return controls[0] === el ? '获奖项' : '奖项等级';
+        }
+        return '奖项等级';
+      }
+      if (/掌握程度|熟练程度|技能水平/.test(caption) && /技能|计算机能力/.test(sectionTitle(el))) {
+        const controls = [...box.querySelectorAll('input, select, [role=combobox]')].filter(visible)
+          .filter(control => !control.querySelector('input, select, [role=combobox]'));
+        if (controls.length === 2 && controls.includes(el) && controls.filter(isChoiceControl).length === 1)
+          return isChoiceControl(el) ? caption : '技能名称';
+      }
       if (/证件|身份证/.test(caption)) {
         const hint = clean(choiceRoot(el)?.querySelector("[class*=hint], [class*=placeholder]")?.textContent);
         if (/证件类型/.test(hint)) return "证件类型";
@@ -240,8 +317,6 @@
       }
       return caption;
     }
-    const associated = associatedLabels(el).find((text) => text.length <= 100);
-    if (associated) return associated;
     if (el?.tagName === "TEXTAREA") {
       const scope = sectionScope(el), title = clean(scope?.querySelector("[class*='divider-title'], .section-title, [role=heading], h2, h3")?.textContent);
       if (/^(?:自我评价|个人评价|自我描述)$/.test(title) && scope.querySelectorAll("textarea").length === 1) return title;
@@ -275,39 +350,49 @@
       if ([...node.children].some(child => !child.querySelector(controlSelector) && (child.matches("[class*='divider-title']") || child.querySelector("[class*='divider-title']")))) return node;
     return null;
   };
-  const sectionTitle = (el) => {
-    const ownTitle = clean(fieldTitle(el));
+  const rawSectionTitle = (el) => {
+    const ownTitle = labelCaption(fieldContainer(el)?.querySelector(`${fieldLabelSelector}, label`)) || associatedLabels(el)[0] || '';
     const scope = sectionScope(el);
     const heading = [...(scope?.querySelectorAll(".blockTitle, .section-title, .form-title, .ihr_recruit_resume_title_main, .ihr_recruit_resume_title, h1, h2, h3, h4, h5, h6, legend, [role=heading], [class*='blockTitle'], [class*='section-title'], [class*='model_title'], [class*='divider-title']") || [])]
       .filter(node => !node.contains(el) && !node.querySelector(controlSelector) && (node.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING))
       .map((node) => { const copy = node.cloneNode(true); copy.querySelectorAll("button, a, [role=button], [class*=tip], [class*=hint], [class*=description], .ihr_recruit_resume_title_main-action_button, small").forEach(child => child.remove()); return clean(copy.textContent); }).filter(text => text && text.length <= 80).at(-1);
     if (heading) return heading;
+    // Repeated rows inherit the nearest preceding subsection, before an outer card heading.
+    for (let node = el?.parentElement, depth = 0; node && depth < 24; node = node.parentElement, depth++) {
+      const branch = [...node.children].find((child) => child === el || child.contains(el));
+      // ponytail: local title markup bounds unfamiliar modules too; no site or title-name list.
+      const cardHeading = node.querySelector(":scope > .ant-card-head .ant-card-head-title") || [...node.children]
+        .filter(child => child !== branch && !child.matches(`${fieldLabelSelector}, label`) && !child.querySelector(controlSelector) && (child.compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING))
+        .map(child => child.matches("[class*='title'], [class*='Title']") ? child : child.querySelector("[class*='title'], [class*='Title']"))
+        .filter(heading => heading && !heading.matches(`${fieldLabelSelector}, label`) && !heading.querySelector("button, a, [role=button]")).at(-1);
+      const cardTitle = clean(cardHeading?.textContent);
+      if (cardTitle && cardTitle.length <= 80 && (cardHeading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) return cardTitle;
+      const candidate = [...node.children].filter((child) => child !== branch && !child.matches(`${fieldLabelSelector}, label`) && (child.compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && !child.querySelector(`${controlSelector}, button, a, h1, h2, h3, h4, h5, h6, [role=heading]`)).map((child) => clean(child.innerText || child.textContent))
+        .filter((text) => text && text !== ownTitle && text.length <= 80 && !/^(?:添加|新增)/.test(text) && (hasKnownSection(text) || /基本信息|基本资料|个人信息|求职意向|实践经历|资料证明人|自我描述/.test(text))).at(-1);
+      if (candidate) return candidate;
+    }
     // Form libraries may put the module heading beside the entire form body.
     for (let node = el, depth = 0; node && depth < 24; node = node.parentElement, depth++) {
       const sibling = node.previousElementSibling;
       const text = clean(sibling?.innerText || sibling?.textContent);
-      if (sibling && !sibling.matches(`${fieldLabelSelector}, label`) && !sibling.querySelector(controlSelector) && text.length <= 80
+      if (sibling && !sibling.matches(`${fieldLabelSelector}, label`) && !sibling.querySelector(controlSelector) && text.length <= 80 && !/^(?:添加|新增)/.test(text)
         && (hasKnownSection(text) || /基本信息|个人信息|求职意向|实践经历|资料证明人/.test(text))) return text;
-    }
-    // Fallback for component libraries that render headings as plain div text.
-    for (let node = el?.parentElement, depth = 0; node && depth < 8; node = node.parentElement, depth++) {
-      const branch = [...node.children].find((child) => child === el || child.contains(el));
-      const candidate = [...node.children].filter((child) => child !== branch && !child.matches(`${fieldLabelSelector}, label`) && (child.compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING)
-        && !child.querySelector(`${controlSelector}, button, a, h1, h2, h3, h4, h5, h6, [role=heading]`)).map((child) => clean(child.innerText || child.textContent))
-        .find((text) => text && text !== ownTitle && text.length <= 80 && (hasKnownSection(text) || /基本信息|基本资料|个人信息|求职意向|实践经历|资料证明人|自我描述/.test(text)));
-      if (candidate) return candidate;
     }
     const previous = [...document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, [role=heading], .blockTitle, .section-title, .form-title, [class*='blockTitle'], [class*='section-title'], [class*='model_title']")]
       .filter((node) => clean(node.innerText || node.textContent).length <= 80)
       .filter((node) => node.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1);
     return clean(previous?.innerText || previous?.textContent || "");
   };
+  // ponytail: numbered captions carry record help, not a separate module or its source type.
+  const sectionTitle = el => rawSectionTitle(el).replace(/\s*[-－–—#]\s*\d+\s*(?:[（(].*[）)])?$/, "");
   const SECTION_ALIASES = {
     "教育背景": ["教育经历", "教育背景", "学历经历"],
     "教育经历": ["教育背景", "教育经历", "学历经历"],
     "工作经历": ["工作经验", "工作经历", "任职经历", "工作/实习经历", "工作与实习经历", "工作及实习经历"],
     "实习经历": ["实习经验", "实习经历"],
     "学生干部经历": ["学生干部经历", "干部经历", "校园经历", "社团经历", "在校实践", "校内实践"],
+    "社团经历": ["社团经历", "社团经验"],
     "项目经验": ["项目经历", "项目经验", "项目经验"],
     "项目经历": ["项目经验", "项目经历"],
     "技能": ["技能", "专业技能", "技能特长", "计算机能力"],
@@ -324,8 +409,10 @@
     : /荣誉|奖励|奖学金|评奖|评优|表彰/.test(title) ? "荣誉" : "获奖经历";
   const matchesSection = (title, section) => {
     const value = normalize(title);
+    const kinds = [/教育|学历/, /工作|实习|任职/, /项目/, /证书|英语/, /语言|外语/, /技能|计算机能力/, /干部|社团|校园经历|在校实践|校内实践/].filter(pattern => pattern.test(value));
+    if (kinds.length > 1 && !(section === '证书' && kinds.length === 2 && /证书/.test(value) && /技能|计算机能力/.test(value))) return false;
     if (section === '技能' && /证书|语言|外语/.test(value)) return false;
-    if (/^项目(?:经历|经验)$/.test(section) && /项目(?:活动|[\/／、与及和])*(?:经历|经验)/.test(value)) return true;
+    if (/^项目(?:经历|经验)$/.test(section) && (value === '项目' || /项目(?:活动|[\/／、与及和])*(?:经历|经验)/.test(value))) return true;
     return [section, ...(SECTION_ALIASES[section] || [])].map(normalize).some(name => name && value.includes(name));
   };
   const hasKnownSection = (title) => {
@@ -355,6 +442,8 @@
       && anchorMatch(el, "语言类型") && (languageCategoryScope(el)
         || section === "语言能力" && [...(sectionScope(el)?.querySelectorAll("button, a, [role=button]") || [])].some(languageCategoryButton))) return true;
     const title = normalize(sectionTitle(el));
+    if (section === '学生干部经历' && /社团/.test(title) && !/干部/.test(title)
+      && moduleTitles().some(title => normalize(title).includes('学生干部经历'))) return false;
     if (!title) return !["竞赛", "荣誉"].includes(section);
     if (["获奖经历", "竞赛", "荣誉"].includes(section) && awardModule(title) !== section) return false;
     if (section === "证书" && /英语能力|英语证书|英语考试/.test(title)) return false;
@@ -434,6 +523,10 @@
     }
     const anchors = candidate ? [...candidate.querySelectorAll(controlSelector)].filter((el) => anchorMatch(el, anchor)) : [];
     const row = candidate && (candidate.matches(".resumeEditForm-item") || anchors.length === 1) ? candidate : null;
+    if (label === '全日制') {
+      const checkboxes = fields().filter(el => row?.contains(el) && isCheckbox(el) && isFullTimeLabel(fieldTitle(el)));
+      return checkboxes.length === 1 ? checkboxes[0] : null;
+    }
     const projectOverride = anchor === "项目名称" && projectFieldOverride(row, label);
     if (projectOverride) return projectOverride;
     if (row && /结束时间|毕业时间|毕业年份|教育结束|工作结束|项目结束/.test(label) && /^(?:至今|现在|在职)$/i.test(String(value).trim())) {
@@ -482,7 +575,7 @@
     // section when a component library hides the section heading from the DOM.
     const uniqueFallback = !section && /学校|院校|专业|学历|性别|出生日期|所在地|最近公司|奖项名称|获奖项/.test(label)
       ? findField(label, rowIndex) : null;
-    return atsxSearchInput(item?.querySelector(controlSelector) || direct || scoped || (standaloneSchoolCity.length === 1 ? standaloneSchoolCity[0] : null) || uniqueFallback);
+    return atsxSearchInput(direct || item?.querySelector(controlSelector) || scoped || (standaloneSchoolCity.length === 1 ? standaloneSchoolCity[0] : null) || uniqueFallback);
   };
   const labelText = (el) => {
     const parts = [fieldTitle(el), ...associatedLabels(el)];
@@ -500,8 +593,7 @@
 
   const moduleTitle = (el) => {
     const section = sectionTitle(el);
-    // Numbered record captions belong to one module, rather than separate first rows.
-    if (section) return hasKnownSection(section) ? section.replace(/\s*[-－–—#]\s*\d+\s*(?:[（(].*[）)])?$/, "") : section;
+    if (section) return section;
     let node = el;
     for (let depth = 0; node && depth < 16; depth++, node = node.parentElement) {
       const heading = node.querySelector?.("h1, h2, h3, h4, h5, h6, legend, [role=heading], .section-title, .form-title, .title");
@@ -555,6 +647,7 @@
     el.className, el.getAttribute("aria-autocomplete"), el.parentElement?.className, el.parentElement?.getAttribute("role"), el.closest("[class*='auto-complete'], [class*='auto_complete'], [class*='autocomplete']")?.className
   ].join(" ")) || el.type === "search" && el.getAttribute("role") === "combobox" || /^(?:list|both|inline)$/i.test(el.getAttribute("aria-autocomplete") || ""));
   const isAutocompleteControl = (el) => isSuggestionControl(el) || isExplicitTextInput(el) && !!choiceRoot(el)
+    || el?.tagName !== 'INPUT' && el?.getAttribute('role') === 'combobox' && !!choiceSearch(el)
     || el?.tagName === "INPUT" && !el.readOnly
     && !["date", "month"].includes(el.type) && !fullDateRange(el).includes(el)
     && (el.matches('[role=combobox], [aria-haspopup=listbox]') || (el.hasAttribute("options") || el.closest('[class*="dropdown-open"], [class*="dropdown_open"]'))
@@ -603,7 +696,7 @@
       const root = choiceRoot(liveControl || el);
       const scope = root?.isConnected ? root : box;
       const displays = [...(scope?.querySelectorAll("[aria-valuetext], [class]") || [])].filter((node) =>
-        node !== el && clean(node.textContent) && !/placeholder/i.test(String(node.className || "")) && !/^(?:请输入|请选择)|^please select$/i.test(clean(node.textContent)));
+        node !== el && clean(node.textContent) && !/placeholder/i.test(String(node.className || "")) && !/^(?:请输入|请选择|点击选择)|^please select$/i.test(clean(node.textContent)));
       const display = displays.find((node) => /display-value|selection-item|selection[-_]+choice|single-?value|selectitem|select-filter-label|(?:select|selector)[-_]*(?:value|tag|item)|multi-?value|selected/i.test(String(node.className || "")))
         || displays.find((node) => /calc(?:ele)?/i.test(String(node.className || "")) && !/^(?:请输入|请选择)/.test(clean(node.textContent)));
       const tags = [...(scope?.querySelectorAll?.("[class*='tag'], [class*='Tag']") || [])]
@@ -617,11 +710,12 @@
         ).map(node => clean(node.textContent)).filter(Boolean)])];
       const multipleDisplay = selectedValues.length > 1 || isMultipleChoice(liveControl || el) ? selectedValues.join("、") : "";
       const value = clean(liveControl?.getAttribute("aria-valuetext") || typedValue || multipleDisplay || display?.textContent || tags.join("") || ownValue);
-      return /^(?:请选择|请输入|please select(?:\b|$)|select(?:\s|$))/i.test(value) ? "" : value;
+      return /^(?:请选择|请输入|点击选择|please select(?:\b|$)|select(?:\s|$))/i.test(value) ? "" : value;
     }
     return clean(el.value ?? el.getAttribute("aria-valuetext") ?? (el.isContentEditable ? el.innerText : ""));
   };
   const optionTexts = (el) => {
+    if (isCheckbox(el)) return ['true', 'false'];
     const scope = el.tagName === "SELECT" ? el : fieldContainer(el) || el.parentElement;
     const controlled = el.getAttribute("aria-controls") ? document.getElementById(el.getAttribute("aria-controls")) : null;
     const nodes = [...(scope?.querySelectorAll("option, [role=option], [class*='option'], [class*='Option']") || []), ...(controlled?.querySelectorAll("option, [role=option], [class*='option'], [class*='Option']") || [])];
@@ -673,6 +767,7 @@
     "获奖类型": ["获奖类型", "奖励类型", "奖项类型", "奖项类别"],
     "奖项名称": ["获奖项", "获奖名称", "奖励名称", "奖项", "奖项名称", "竞赛名称", "荣誉名称"],
     "获奖级别": ["奖项级别", "奖励级别", "获奖等级", "获奖级别", "大赛等级", "大赛级别", "比赛等级", "竞赛等级", "荣誉等级"],
+    "奖项等级": ["奖项等级", "获奖名次", "奖项名次", "大赛成绩", "竞赛成绩", "比赛成绩"],
     "籍贯": ["籍贯", "家乡"],
     "户口所在地": ["户籍所在地", "户籍地", "户口所在地", "户籍地址"],
     "培养方式": ["学习方式", "学习形式", "就读方式", "受教育类型", "学历类型"],
@@ -698,7 +793,8 @@
     "项目链接": ["项目链接", "项目地址", "项目网址", "在线链接", "演示地址", "GitHub链接", "Github链接"],
     "项目职务": ["职务", "项目角色", "角色", "在项目中担任的角色"],
     "项目职责": ["职责", "项目中职责", "个人工作"],
-    "获奖项": ["获奖名称", "奖励活动", "奖项名称", "奖项", "竞赛名称", "荣誉名称", "获奖大赛"],
+    "项目亮点": ["亮点", "项目成果", "成果"],
+    "获奖项": ["获奖名称", "奖励活动", "奖项名称", "奖项", "竞赛名称", "大赛名称", "比赛名称", "荣誉名称", "获奖大赛"],
     "获奖描述": ["奖励描述", "荣誉描述", "奖项说明", "获奖说明"],
     "证书名称": ["证书", "资格证书"],
     "证书描述": ["描述", "说明", "证书说明"],
@@ -780,6 +876,15 @@
       const wanted = normalize(value);
       const label = normalize(labelText(el) || el.value || el.parentElement?.textContent);
       if (!wanted || /没有.*(?:经历|经验|成果)|无.*(?:经历|经验|成果)/.test(associatedLabels(el).join(" "))) return false;
+      if (isCheckbox(el)) {
+        const expected = checkboxExpected(value, fieldTitle(el));
+        if (expected !== null) {
+          if (!editable(el)) return false;
+          if (checkboxChecked(el) !== expected || el.getAttribute('aria-checked') === 'mixed') el.click();
+          return true;
+        }
+        if (isFullTimeLabel(fieldTitle(el))) return false;
+      }
       const shouldCheck = ["true", "1", "yes", "是", "有", "已婚", "男", "女", "至今", "现在", "在职"].includes(wanted) || !!label && (wanted === label || label.includes(wanted) || wanted.includes(label));
       if (shouldCheck && !(el.checked || el.getAttribute("aria-checked") === "true")) el.click();
       return shouldCheck;
@@ -897,7 +1002,11 @@
     const linked = control?.getAttribute?.("aria-controls") ? document.getElementById(control.getAttribute("aria-controls")) : null;
     const popupVisible = (popup) => !!popup && !popup.contains(control) && visible(popup) && !popup.closest('[aria-hidden="true"], [hidden], [inert]') && !/(?:^|[\s_-])(?:leave|exit)(?:$|[\s_-])/i.test(String(popup.className || "")) && (isPopup(popup) || popup.matches("[role=tree]")
       || !popup.matches(controlSelector) && /dropdown|popover|options|calendar.*panel|unmodeled-layer|selector-container|autocomplete|suggest/i.test(String(popup.className || "")) && popupOptionNodes(popup).length > 0);
-    const owned = [linked, control?.nextElementSibling].filter(popupVisible);
+    // aria-controls can name a scroll wrapper inside the actual option popup.
+    const linkedPopups = [linked, linked?.parentElement?.closest(popupSelector), linked?.querySelector('[role=listbox], [role=menu], [role=tree]')].filter(popupVisible);
+    const owned = linkedPopups.length ? linkedPopups : [control?.nextElementSibling].filter(popupVisible);
+    // An explicit popup reference stays authoritative while its options load.
+    if (control?.getAttribute('aria-controls') && linked && !linked.contains(control)) return linkedPopups;
     const root = choiceRoot(control);
     const localRoot = root?.parentElement || control?.parentElement;
     const local = [...(localRoot?.querySelectorAll?.(popupSelector) || [])].filter(popupVisible);
@@ -908,6 +1017,8 @@
       const rect = popup.getBoundingClientRect();
       return Math.abs(rect.left - anchor.left) < 3 && Math.min(Math.abs(rect.top - anchor.bottom), Math.abs(rect.bottom - anchor.top)) < 40;
     }) : [];
+    // A dangling reference can resolve only to the one aligned, expanded portal.
+    if (control?.getAttribute('aria-controls') && !linked) return expandedPortals.length === 1 ? expandedPortals : [];
     const related = [...new Set(owned.length ? owned : local.length ? local : expandedPortals.length === 1 ? expandedPortals : [])];
     return includeGlobal ? [...new Set([...related, ...global])] : related;
   };
@@ -939,7 +1050,7 @@
       const nearby = nearbyPopup(control);
       const freshNearby = nearby && (!previous.has(nearby) || previous.get(nearby) !== signature(nearby)) ? nearby : null;
       const related = popupFor(control, false);
-      return [...new Set(related.length ? related : [...openDropdowns().filter(popup => !previous.has(popup) || previous.get(popup) !== signature(popup)), freshNearby])].filter(popup => popup && !popup.contains(control))
+      return [...new Set(related.length || control.getAttribute('aria-controls') ? related : [...openDropdowns().filter(popup => !previous.has(popup) || previous.get(popup) !== signature(popup)), freshNearby])].filter(popup => popup && !popup.contains(control))
         .sort((left, right) => {
           const distance = (popup) => { const rect = popup.getBoundingClientRect(); return Math.abs(rect.left - anchor.left) + Math.abs(rect.top - anchor.bottom); };
           return distance(left) - distance(right);
@@ -955,7 +1066,7 @@
     if (!document.hasFocus()) globalThis.focus?.();
     control.focus?.();
     let popup = await waitFor(() => readyPopup(control), 160);
-    if (!popup && searchValue != null && (isAutocompleteControl(control) || isSearchableChoiceInput(control)) && editableSearch(control)) {
+    if (!popup && searchValue != null && (isAutocompleteControl(control) || isSearchableChoiceInput(control) || control.getAttribute('role') === 'combobox')) {
       const trusted = !!globalThis.chrome?.runtime?.sendMessage;
       trace.activation = trusted ? "trusted-search-trigger" : "synthetic-search-trigger";
       await clickOption(trigger, trusted, null, trace);
@@ -965,9 +1076,10 @@
         if (!opened(trigger)) await clickOption(control, trusted, null, trace);
         popup = await waitFor(() => readyPopup(control), 160);
       }
-      if (!popup) {
+      const search = choiceSearch(control);
+      if (!popup && search) {
         // A search-only portal can have zero height until a query is entered.
-        setSearchValue(control, searchValue);
+        setSearchValue(search, searchValue);
         trace.searched = true;
         popup = await waitFor(() => readyPopup(trigger), 5000);
       }
@@ -1036,6 +1148,7 @@
     await closeVisibleDropdowns(control);
   };
   const popupOptionNodes = (scope, deduplicate = true) => {
+    if (scope?.closest('[data-resume-autofill-ui]')) return [];
     const selector = "[role=option], li, [data-value], [class*='option'], [class*='Option'], [class*='item'], [class*='Item']";
     const text = (node) => clean(node.textContent || node.getAttribute("data-value") || node.getAttribute("value"));
     const action = (node) => node.matches?.("button, [role=button], [data-confirm], [data-confirm] *, [class*='button'], [class*='Button'], [class*='btn'], [class*='Btn']") || /^(?:确定|取消)$/.test(text(node));
@@ -1114,6 +1227,10 @@
       if (wanted.size && !wanted.has(descriptor.key)) continue;
       const control = resolveField(descriptor.key);
       if (!control || controlValue(control) || !(isChoiceControl(control) || isAutocompleteControl(control))) continue;
+      if (isCheckbox(control)) {
+        descriptor.options = optionTexts(control); descriptor.optionSource = 'checkbox'; descriptor.optionCount = 2;
+        continue;
+      }
       if (/radio|checkbox/.test(descriptor.type || "")) {
         if (control.matches(".phoenix-radio-group")) {
           descriptor.options = [...new Set([...control.querySelectorAll(".phoenix-radio")]
@@ -1168,7 +1285,7 @@
       descriptor.options = [...new Set([...known, ...popupDetails.texts])].slice(0, 80);
       descriptor.optionSource = selectedPopup ? "popup" : "popup-not-found";
       descriptor.optionCount = descriptor.options.length;
-      descriptor.hasSearch = popupDetails.hasSearch || control.tagName === "INPUT" && !control.readOnly;
+      descriptor.hasSearch = popupDetails.hasSearch || !!choiceSearch(control);
       descriptor.candidatesTruncated = descriptor.options.length >= 80;
       descriptor.hasConfirmation = !!confirmationFor(selectedPopup, control);
       const cartText = clean(selectedPopup?.innerText || selectedPopup?.textContent);
@@ -1207,6 +1324,17 @@
     const name = String(row?.name || "");
     return /省/.test(name) ? "省区级" : /国家/.test(name) ? "国家级" : /院|校|学/.test(name) ? "院校级" : "";
   };
+  const awardPrize = row => {
+    const prizes = [...new Set(`${row?.name || ''} ${row?.level || ''}`.match(/(?:特|[一二三四五六七八九十\d]+)等奖|第[一二三四五六七八九十\d]+名|top\s*\d+|入围决赛/gi) || [])];
+    return prizes.length === 1 ? prizes[0] : '';
+  };
+  const awardResultOption = (value, candidates) => {
+    const match = clean(value).match(/^(?:第(\d+)名|top\s*(\d+))$/i);
+    const rank = Number(match?.[1] || match?.[2]);
+    if (!rank || rank < 1) return null;
+    return candidates.map(candidate => ({ candidate, top: Number(clean(candidate.textContent || candidate).match(/^top\s*(\d+)$/i)?.[1]) }))
+      .filter(item => item.top >= rank).sort((a,b) => a.top-b.top)[0]?.candidate || null;
+  };
   const projectParts = (row) => {
     const text = String(row?.description || "").trim();
     if (row?.summary || row?.responsibilities) return { summary: row.summary || text, responsibilities: row.responsibilities || "" };
@@ -1214,20 +1342,27 @@
     return marker > 0 ? { summary: text.slice(0, marker).trim(), responsibilities: text.slice(marker).trim() } : { summary: text, responsibilities: "" };
   };
   const clickOption = async (el, trusted = false, changed, record, plainTrusted = false) => {
+    const resolveTarget = typeof el === 'function' ? el : null;
+    if (resolveTarget) el = resolveTarget();
+    if (el && getComputedStyle(el).pointerEvents === 'none') el = selectionTarget(el);
     if (!el || uploadControl(el)) { if (record) record.blocked = "upload-control"; return false; }
     const panel = document.getElementById("resume-autofill-page-action");
     const pointerEvents = panel?.style.pointerEvents;
     let delivered = false;
-    const observe = event => { if (event.target === el || el.contains(event.target)) delivered = true; };
+    if (record) record.targetTag = el.tagName.toLowerCase();
+    const observe = event => { if (event.target === el || el?.contains(event.target)) delivered = true; };
     document.addEventListener('click', observe, true);
     // Our review overlay must not intercept native clicks on page controls.
     if (panel) panel.style.pointerEvents = "none";
     try {
       if (trusted && globalThis.chrome?.runtime?.sendMessage) {
         const hitPoint = () => {
+          // A virtual list can replace its row while scrolling it into view.
+          if (resolveTarget) el = resolveTarget();
+          if (!el?.isConnected || uploadControl(el)) return null;
           const rect = el.getBoundingClientRect();
-          for (const fraction of [0.5, 0.2, 0.8]) {
-            const point = { x: rect.left + rect.width * fraction, y: rect.top + rect.height / 2 };
+          for (const [x, y] of [[0.5, 0.5], [0.2, 0.5], [0.8, 0.5]]) {
+            const point = { x: rect.left + rect.width * x, y: rect.top + rect.height * y };
             const hit = document.elementFromPoint(point.x, point.y);
             if (hit && (hit === el || el.contains(hit))) return point;
           }
@@ -1235,11 +1370,12 @@
         };
         // Portals realign after focus/scroll; scrolling a stale option moves its anchor again.
         if (!hitPoint() && !await waitFor(hitPoint, 350)) {
-          el.scrollIntoView?.({ behavior: "instant", block: "center", inline: "nearest" });
+          el?.scrollIntoView?.({ behavior: "instant", block: resolveTarget ? "nearest" : "center", inline: "nearest" });
           await wait(80);
           await waitFor(hitPoint, 800);
         }
-        const rect = el.getBoundingClientRect();
+        const rect = el?.getBoundingClientRect();
+        if (!rect) return false;
         if (record) record.rect = { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
         try {
           const point = hitPoint();
@@ -1250,6 +1386,8 @@
           if (result?.clicked && !delivered && record) { record.trusted = false; record.trustedError = "trusted-click-not-observed"; }
         } catch (error) { if (record) record.trustedError = String(error?.message || error); }
       }
+      if (resolveTarget) el = resolveTarget();
+      if (!el?.isConnected || uploadControl(el)) return false;
       if (record) record.fallback = true;
       const rect = el.getBoundingClientRect();
       const point = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0 };
@@ -1290,7 +1428,12 @@
     if (option?.querySelector?.("[class*='arrow'], [class*='Arrow']")) return option;
     const marker = option?.querySelector?.("input[type=checkbox], input[type=radio], [role=checkbox], [role=radio], [aria-checked], [class*='Checkbox'], [class*='checkbox'], [class*='Radio'], [class*='radio']");
     if (marker) return marker.closest?.("input, label, button, [role=checkbox], [role=radio], [class*='icon'], [class*='Icon']") || marker;
-    return option;
+    const row = (option && getComputedStyle(option).pointerEvents === 'none' ? option.parentElement : option)?.closest?.('[role=option], li, td, [role=gridcell], button, [role=button], a');
+    if (row && ![...row.querySelectorAll('[role=option], li, td, [role=gridcell]')].some(node => node !== option && !node.contains(option) && !option.contains(node))) return row;
+    let target = option;
+    while (target?.parentElement && getComputedStyle(target).pointerEvents === 'none'
+      && !isPopup(target.parentElement) && clean(target.parentElement.textContent) === clean(option.textContent)) target = target.parentElement;
+    return target;
   };
   const selectionTargets = (option) => {
     const listItem = option?.closest?.("[class*='list-item-container'], [class*='List-item-container']");
@@ -1335,13 +1478,20 @@
   const pendingSuggestions = new WeakSet();
   const searchInputSelector = 'input:not([type]), input[type=text], input[type=search], textarea';
   const editableSearch = el => !!el?.matches?.(searchInputSelector) && visible(el) && !el.readOnly;
+  const choiceSearch = el => {
+    if (editableSearch(el)) return el;
+    const inputs = [...(el?.querySelectorAll?.(searchInputSelector) || [])].filter(editableSearch);
+    return inputs.length === 1 ? inputs[0] : null;
+  };
   const setSearchValue = (el, value) => {
+    el.focus?.();
     if (isAutocompleteControl(el)) pendingSuggestions.add(el);
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     setter ? setter.call(el, String(value)) : (el.value = String(value));
     el.dispatchEvent(new Event("input", { bubbles: true }));
   };
   const restoreChoiceSearch = (el, value) => {
+    el = choiceSearch(el);
     if (!el || el.tagName !== "INPUT" || el.value === value) return;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     setter ? setter.call(el, value) : (el.value = value);
@@ -1478,10 +1628,11 @@
         || languageCategoryDetail && anchor === "语言类型")
         ? languageCategoryDetail && anchor === "语言类型" && row && anchorField ? anchorField : languageCategoryDetail ? languageCategory
           : languagePeers.filter(field => /^(?:语言考试|英语等级)[＊*]?$/.test(field.label)).at(-1)?.el : null;
-      const parentChoice = educationParent || gpaParent || languageParent || (isChoiceControl(el) && /名称/.test(label) && row
+      const parentChoice = educationParent || gpaParent || languageParent || (anchor === '获奖项' && label === '奖项等级' && row && isChoiceControl(anchorField) ? anchorField : null) || (isChoiceControl(el) && /名称/.test(label) && row
         ? metadata.filter((field) => field.index < index && row.contains(field.el) && isChoiceControl(field.el) && /类型|类别/.test(field.label)).at(-1)?.el : null);
       const dateField = /时间|日期|年月|date|month/i.test(`${label} ${el.type || ''}`);
       const range = dateField ? fullDateRange(el) : [];
+      const fieldBox = fieldContainer(el);
       return {
         key, index,
         label: label.slice(0, 160), labels: associatedLabels(el).slice(0, 3).map((value) => value.slice(0, 100)),
@@ -1491,11 +1642,16 @@
         ariaLabelledby: references("aria-labelledby"), ariaDescribedby: references("aria-describedby"),
         required: !!el.required || el.getAttribute("aria-required") === "true", role: el.getAttribute("role") || "",
         isChoice: isChoiceControl(el),
+        checked: isCheckbox(el) ? el.getAttribute('aria-checked') === 'mixed' ? null : checkboxChecked(el) : undefined,
         blocked: !!el.disabled || el.getAttribute("aria-disabled") === "true",
         structure: { tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', inputType: el.type || '', readOnly: !!el.readOnly,
           autocomplete: isAutocompleteControl(el), searchable: isSearchableChoiceInput(el),
           rangeCount: range.length, rangeIndex: range.indexOf(el), datePartCount: dateField && !range.length ? dateControls(el).length : 0,
-          fieldControlCount: fieldContainer(el)?.querySelectorAll(controlSelector).length || 0 },
+          fieldControlCount: fieldBox?.querySelectorAll(controlSelector).length || 0, dateProxy: dateField && compositeDateInputs(el)[0] === el,
+          captionSource: el.hasAttribute('aria-label') ? 'aria-label' : el.hasAttribute('aria-labelledby') ? 'aria-labelledby' : el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`) ? 'label-for'
+            : precedingFieldCaption(el) ? 'previous' : fieldBox?.querySelector(`${fieldLabelSelector}, label`) ? 'container' : associatedLabels(el).length ? 'wrapping-label' : 'none',
+          rangeInputs: dateField ? [...(fieldBox?.querySelectorAll('input') || [])].filter(input => visible(input) && input.type !== 'hidden').slice(0, 4).map(input => ({ type: input.type, readOnly: !!input.readOnly,
+            marker: /^[~～至—–-]$/.test(clean(input.value || input.placeholder || input.getAttribute('aria-label'))) ? 'separator' : clean(input.value) ? 'value' : clean(input.placeholder) ? 'placeholder' : clean(input.getAttribute('aria-label')) ? 'named' : 'empty' })) : undefined },
         constraints: { maxLength: el.maxLength >= 0 ? el.maxLength : undefined, pattern: el.pattern || "", min: el.min || "", max: el.max || "", step: el.step || "" },
         gpaScaleValue: row && /GPA|绩点/i.test(label) ? controlValue([...row.querySelectorAll(controlSelector)].find(control => /GPA.*(?:类型|BASE)|绩点.*(?:类型|满分|制式)|满绩/i.test(fieldTitle(control)))) : "",
         examValue: /外语等级|考试分数/.test(label) ? controlValue(languageParent) : "",
@@ -1560,8 +1716,8 @@
       if (explicit || range === box) {
         const all = [...range.querySelectorAll('input')].filter(input => visible(input) && input.type !== 'hidden');
         const separator = all.some(rangeSeparator) || /[~～至—–-]/.test(clean(range.textContent));
-        const inputs = all.filter(input => !rangeSeparator(input));
-        const title = typeof caption === 'string' && caption || labelCaption(box?.querySelector(`${fieldLabelSelector}, label`));
+        const inputs = [...new Set(all.map(input => compositeDateInputs(input)[0] || input))].filter(input => !rangeSeparator(input));
+        const title = typeof caption === 'string' && caption || associatedLabels(target)[0] || labelCaption(precedingFieldCaption(target) || box?.querySelector(`${fieldLabelSelector}, label`));
         const rangeHint = explicit || /时间|日期|年月|date|month/i.test(title) && (separator || inputs.every(input => ['date','month'].includes(input.type)));
         if (rangeHint && inputs.length === 2 && inputs.includes(target) && inputs.every(input => !isYearPart(input) && !isMonthPart(input))) return inputs;
       }
@@ -1775,8 +1931,8 @@
         if (!chooseOptions.keepExistingCalendar) liveDateControl()?.scrollIntoView?.({ block: "center", inline: "nearest" });
         await wait(80);
         const dateInput = liveDateControl()?.matches?.("input") ? liveDateControl() : liveDateControl()?.querySelector?.("input");
-        const dateTrigger = () => dateInput?.matches?.(".phoenix-select__input--unText")
-          ? choiceRoot(liveDateControl()) || liveDateControl() : dateInput || liveDateControl();
+        const dateTrigger = () => compositeDateInputs(liveDateControl())[1] || (dateInput?.matches?.(".phoenix-select__input--unText")
+          ? choiceRoot(liveDateControl()) || liveDateControl() : dateInput || liveDateControl());
         const priorDatePopups = new Set(openDropdowns());
         if (!document.hasFocus()) globalThis.focus?.();
         (dateInput || liveDateControl())?.focus?.({ preventScroll: true });
@@ -1790,7 +1946,7 @@
         const dateText = (node) => {
           const text = exactText(node).replace(/\s/g, "").replace(/^(一|二|三|四|五|六|七|八|九|十|十一|十二)月$/, (_match, month) => `${["一","二","三","四","五","六","七","八","九","十","十一","十二"].indexOf(month) + 1}月`);
           const month = ['data-value', 'title', 'aria-label'].map(name => clean(node?.getAttribute?.(name)))
-            .find(value => /^\d{4}-(?:0[1-9]|1[0-2])$/.test(value) && Number(value.slice(-2)) === Number(text));
+            .find(value => /^\d{4}-(?:0?[1-9]|1[0-2])(?:-\d{1,2})?$/.test(value) && Number(dateParts(value)[1]) === Number(text));
           return /^\d{1,2}$/.test(text) && month ? `${Number(text)}月` : text;
         };
         const exactNodes = (scope, pattern) => [...scope.querySelectorAll("*")].filter((node) => {
@@ -1871,7 +2027,7 @@
             const center = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - rect.left) + Math.abs(r.top - rect.top); };
             return center(a) - center(b);
           })[0] || popupRoots().find((popup) => exactNodes(popup, /^(?:0?[1-9]|1[0-2])月$/).length >= 6) || monthPanel;
-        trace.datePicker = { protocol: CONTENT_PROTOCOL, popupCount: popupRoots().length, panelFound: !!monthPanel, monthCount: monthPanelDetails ? new Set(monthPanelDetails.monthNodes.map(dateText)).size : 0, reopenedYearList: reopenYearList };
+        trace.datePicker = { protocol: CONTENT_PROTOCOL, popupCount: popupRoots().length, panelFound: !!monthPanel, monthCount: monthPanelDetails ? new Set(monthPanelDetails.monthNodes.map(dateText)).size : 0, reopenedYearList: reopenYearList, proxy: compositeDateInputs(liveDateControl()).length === 2 };
         if (reopenYearList && invalidYearList()) {
           trace.failure = "year-option-not-visible";
           await finishDatePicker(monthPanel, liveDateControl());
@@ -1948,7 +2104,10 @@
             && !node.closest('[disabled], [aria-disabled=true], [data-disabled=true], [class*="disabled"]')), 1400);
           trace.datePicker.month = Number(month);
           trace.datePicker.monthFound = !!monthNode;
-          if (monthNode) monthNode.click();
+          if (monthNode) {
+            trace.datePicker.monthClick = {};
+            await clickOption(monthNode, true, null, trace.datePicker.monthClick);
+          }
           await wait(40);
           trace.confirmed = !!monthNode && !!await waitFor(() => dateValueMatches(liveDateControl(), value), 800);
           // Range pickers commit both inputs only after the end click. A
@@ -2033,7 +2192,7 @@
             return !!await waitFor(() => dateValueMatches(liveDateControl(), sourceDay ? value : formatted), 800);
           };
           const dayCell = [...calendar.querySelectorAll("[role=gridcell], td, [role=option], button, [class*='cell'], [class*='Cell']")].map((el) => el.closest("td, [role=gridcell]") || el).find((el) => !el.disabled && el.getAttribute("aria-disabled") !== "true" && !/disabled|(?:prev|previous|next|other|last)[-_ ]?month|outside/i.test(String(el.className || ""))
-            && (!el.getAttribute("title") || el.getAttribute("title") === `${year}-${pad2(month)}-${pad2(day)}`) && normalize(el.textContent) === normalize(String(Number(day))));
+            && (!el.getAttribute("title") || dateParts(el.getAttribute('title')).join('-') === `${year}-${pad2(month)}-${pad2(day)}`) && normalize(el.textContent) === normalize(String(Number(day))));
           const dayNode = dayCell?.querySelector("button, [role=button], [class*='date'], [class*='Date'], [class*='cell-inner']") || dayCell;
           trace.datePicker.dayFound = !!dayNode;
           if (dayNode) {
@@ -2079,13 +2238,13 @@
     const readControl = () => controlValue(control, controlBox)
       || (!control.isConnected ? clean(controlBox?.querySelector("[class*='select__tag'], [class*='select-tag']")?.textContent) : "");
     Object.assign(trace, { path: "popup", before: readControl() });
-    let popup = chooseOptions.popup?.isConnected && visible(chooseOptions.popup) && (isPopup(chooseOptions.popup) || popupMatchesValue(chooseOptions.popup, value)) ? chooseOptions.popup : [...new Set([...popupFor(control, false), ...(lastOpenedControl === control && lastOpenedPopup && isPopup(lastOpenedPopup) ? [lastOpenedPopup] : [])])].sort((a, b) => {
+    let popup = !control.getAttribute('aria-controls') && chooseOptions.popup?.isConnected && visible(chooseOptions.popup) && (isPopup(chooseOptions.popup) || popupMatchesValue(chooseOptions.popup, value)) ? chooseOptions.popup : [...new Set([...popupFor(control, false), ...(!control.getAttribute('aria-controls') && lastOpenedControl === control && lastOpenedPopup && isPopup(lastOpenedPopup) ? [lastOpenedPopup] : [])])].sort((a, b) => {
       const distance = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - control.getBoundingClientRect().left) + Math.abs(r.top - control.getBoundingClientRect().top); };
       return distance(a) - distance(b);
     })[0];
     let searched = false;
     if (!popup) {
-      popup = await openChoice(control, (isAutocompleteControl(control) || isSearchableChoiceInput(control)) && !isLocationLabel(label) ? value : undefined);
+      popup = await openChoice(control, (isAutocompleteControl(control) || isSearchableChoiceInput(control) || isSchoolLabel(label) || /^(?:公司名称|企业名称|单位名称)$/.test(label)) && !isLocationLabel(label) ? value : undefined);
       trace.opening = { ...lastOpening };
       searched = searched || !!lastOpening?.searched;
     }
@@ -2134,14 +2293,13 @@
       const found = await waitFor(() => {
         const distance = (el) => { const r = el.getBoundingClientRect(); return Math.abs(r.left - controlRect.left) + Math.abs(r.top - controlRect.top); };
         return popupFor(control, false).sort((a, b) => distance(a) - distance(b))[0]
-          || (previous?.isConnected && isPopup(previous) ? previous : null)
-          || nearbySuggestionPopup(control, value)
-          || nearbyPopup(control);
+          || (!control.getAttribute('aria-controls') && ((previous?.isConnected && isPopup(previous) ? previous : null)
+            || nearbySuggestionPopup(control, value) || nearbyPopup(control)));
       }, 1400);
       if (found) popup = found;
     };
     const isLocationPicker = isLocationLabel(label);
-    const search = [...(popup?.querySelectorAll(searchInputSelector) || []), target].find(editableSearch);
+    const search = [...(popup?.querySelectorAll(searchInputSelector) || []), choiceSearch(control)].find(editableSearch);
     // A salary search box filters by displayed range text; searching a raw
     // number such as 3500 hides “2001 ~ 4000”. Match ranges from real options.
     const matchedProficiency = proficiencyOption(value, options(), label);
@@ -2377,7 +2535,11 @@
           return matches.length === 1 ? matches[0] : null;
         };
         const findTreeItem = async (name, parent) => {
-          let item = await waitFor(() => treeItem(name, parent), 1400);
+          const branch = liveTreeItem(parent);
+          // An expanded lazy branch can still be loading its children.
+          const loading = branch?.matches('[aria-busy=true], .ihr_tree-item--unload, .ihr_tree-item--loading')
+            || [...(branch?.querySelectorAll('[aria-busy=true], [class*=spinner], [class*=loading]') || [])].some(visible);
+          let item = await waitFor(() => treeItem(name, parent), loading ? 5000 : 1400);
           if (item) return item;
           const tree = locationTree();
           const scroller = [tree, ...(tree?.querySelectorAll("*") || [])].filter((el) => el?.clientHeight > 60 && el.scrollHeight > el.clientHeight + 2)
@@ -2399,7 +2561,10 @@
         const expandTreeItem = async (item) => {
           item = liveTreeItem(item);
           if (!item) return false;
-          const switcher = item?.querySelector?.(".atsx-tree-switcher, [data-cy=switcher], .ihr_tree-item_status, [class*='expand'], [class*='switcher'], button[aria-label*='展开'], button[aria-label*='expand' i]");
+          const clickTarget = () => {
+            const current = liveTreeItem(item);
+            return current?.querySelector(".atsx-tree-switcher, [data-cy=switcher], .ihr_tree-item_status, [class*='expand'], [class*='switcher'], button[aria-label*='展开'], button[aria-label*='expand' i]") || selectionTarget(current);
+          };
           const opened = () => {
             const current = liveTreeItem(item), currentSwitcher = current?.querySelector(".atsx-tree-switcher, [data-cy=switcher], .ihr_tree-item_status");
             const column = cascadeColumn(current);
@@ -2410,8 +2575,10 @@
           };
           if (opened()) return true;
           // ponytail: only trust the debugger click after the tree actually expands.
-          await clickOption(switcher || selectionTarget(item), true, opened);
-          return !!await waitFor(opened, 1200);
+          const step = { level: Number(treeLevel(item)) };
+          (trace.tree.navigation ||= []).push(step);
+          await clickOption(clickTarget, true, opened, step);
+          return step.expanded = !!await waitFor(opened, 1200);
         };
         // A checkbox tree may be a flat city list, with no parent region to
         // expand. Only discard the supplied parent when the menu has no
@@ -2447,7 +2614,13 @@
               const current = liveTreeItem(leaf)?.querySelector("input[type=checkbox], [role=checkbox]");
               return current ? current.checked || current.getAttribute("aria-checked") === "true" : valueMatches(readControl(), trace.selectedValue, label);
             };
-            if (!selected()) await clickOption(leaf.querySelector(".atsx-tree-node-content-wrapper, .ihr_tree-item_info") || selectionTarget(leaf), true, selected);
+            if (!selected()) {
+              trace.optionClick = {};
+              await clickOption(() => {
+                const current = liveTreeItem(leaf);
+                return current?.querySelector(".atsx-tree-node-content-wrapper, .ihr_tree-item_info") || selectionTarget(current);
+              }, true, selected, trace.optionClick);
+            }
             if (checkbox && !await waitFor(selected, 800)) leaf = null;
           }
           const confirm = confirmationFor(popup, control);
@@ -2479,7 +2652,7 @@
       });
       const semantic = list.filter((el) => matches(el.textContent || el.getAttribute("data-value") || el.getAttribute("value")));
       const salary = /薪|工资|待遇/.test(label) && salaryOption(value, list);
-      const rank = /排名/.test(label) && rankOption(value, list);
+      const rank = /排名/.test(label) ? rankOption(value, list) : /^(?:奖项|获奖|奖励)(?:等级|名次)$/.test(label) ? awardResultOption(value, list) : null;
       const proficiency = proficiencyOption(value, list, label);
       const languageChoice = /^(?:语言|语言类型|语言类别|外语类别|语言名称|语种)[＊*]?$/.test(label);
       const language = languageChoice
@@ -2489,7 +2662,7 @@
       trace.match = { exact: !!exact, salary: !!salary, rank: !!rank, proficiency: !!proficiency, identity: !!identity, semantic: semantic.length };
       const matched = languageChoice ? language.length === 1 ? language[0] : null
         : exact || identity || salary || rank || proficiency || (semantic.length === 1 ? semantic[0] : null);
-      const other = !matched && /^(?:证书名称|获奖项|竞赛名称)$/.test(label.replace(/[＊*]/g, "")) && list.find((el) => normalize(el.textContent) === "其他");
+      const other = !matched && /^(?:证书名称|获奖项|竞赛名称|大赛名称|比赛名称|获奖大赛)$/.test(label.replace(/[＊*]/g, "")) && list.find((el) => /^(?:其他|其它)$/.test(normalize(el.textContent)));
       if (other) trace.fallback = "page-option-other";
       return matched || other || null;
     };
@@ -2521,7 +2694,7 @@
         if (!option) { scroller.scrollTop = originalTop; scroller.dispatchEvent(new Event("scroll", { bubbles: true })); }
       }
     }
-    if (!option && search && /^(?:证书名称|获奖项|竞赛名称)$/.test(label.replace(/[＊*]/g, ""))) {
+    if (!option && search && /^(?:证书名称|获奖项|竞赛名称|大赛名称|比赛名称|获奖大赛)$/.test(label.replace(/[＊*]/g, ""))) {
       setSearchValue(search, "");
       await refreshPopup();
       option = await waitFor(findOption, 800);
@@ -2534,6 +2707,8 @@
       return false;
     }
     trace.optionFound = true;
+    const linkedOptions = control.getAttribute('aria-controls') && document.getElementById(control.getAttribute('aria-controls'));
+    trace.popupLinked = !!linkedOptions && !!popup && (popup.contains(linkedOptions) || linkedOptions.contains(popup));
     trace.option = clean(option.textContent || option.getAttribute("data-value") || option.getAttribute("value"));
     trace.selectedValue = trace.option;
     trace.commit = "option-click";
@@ -2584,11 +2759,24 @@
       trace.commit = "selected-option-protected";
     } else if (!multiSelector) {
       trace.optionClick = {};
-      await clickOption(commitTarget, isAutocompleteControl(control), null, trace.optionClick);
-      if (popup?.isConnected && visible(popup) && !await waitFor(selectionChanged, 350)) {
-        for (const fallbackTarget of selectionTargets(option).filter((candidate) => candidate !== commitTarget)) {
-          await clickOption(fallbackTarget);
-          if (await waitFor(selectionChanged, 350)) break;
+      await clickOption(commitTarget, true, null, trace.optionClick);
+      if (!await waitFor(selectionChanged, 350)) {
+        if ((!popup?.isConnected || !visible(popup)) && (popupFor(control, false).length || nearbySuggestionPopup(control, trace.selectedValue))) await refreshPopup();
+        if (popup?.isConnected && visible(popup)) {
+          // Native pointer-down can remount a candidate before click; never retry its detached node.
+          option = findOption();
+          const retryTarget = selectionTargets(option)[0];
+          if (retryTarget?.isConnected) {
+            attemptedTargets.add(retryTarget);
+            trace.optionClick = { retried: true, plainTrusted: true };
+            await clickOption(retryTarget, true, null, trace.optionClick, true);
+          }
+          for (const fallbackTarget of selectionTargets(findOption()).slice(1)) {
+            if (!popup?.isConnected || !visible(popup) || await waitFor(selectionChanged, 350)) break;
+            attemptedTargets.add(fallbackTarget);
+            await clickOption(fallbackTarget, true, null, null, true);
+            if (await waitFor(selectionChanged, 350)) break;
+          }
         }
       }
     }
@@ -2671,15 +2859,20 @@
     trace.confirmFound = !!confirm;
     const committedControl = control.isConnected ? control : resolveField(elementKeys.get(control));
     // The option click commits component state; synthetic change on its container can clear dependent choices.
-    // Component state can render after its click handler returns. Verify the
-    // displayed value before closing the popup, rather than cancelling it early.
     const autocomplete = isAutocompleteControl(control);
+    const committedSearch = autocomplete && choiceSearch(committedControl || control);
+    const expectedDisplay = year && month && pairIndex < 0 ? value : trace.selectedValue || value;
     if (autocomplete) {
+      // Wait for selected component state before blur/Escape can cancel a pending commit.
+      trace.displayBeforeDismiss = !!await waitFor(() => valueMatches(readControl(), expectedDisplay, label), 800);
+      committedSearch?.blur?.();
       committedControl?.blur?.();
       await closeVisibleDropdowns(committedControl || control);
     }
-    if (autocomplete) pendingSuggestions.delete(committedControl || control);
-    const expectedDisplay = year && month && pairIndex < 0 ? value : trace.selectedValue || value;
+    if (autocomplete) {
+      pendingSuggestions.delete(committedControl || control);
+      pendingSuggestions.delete(committedSearch);
+    }
     trace.confirmed = !!await waitFor(() => valueMatches(readControl(), expectedDisplay, label)
       && (!searchSelect || !committedControl?.value || !selectedBefore && selectedOption()
         || trace.selectionProtected && selectedBefore
@@ -2734,6 +2927,7 @@
       if (actualRange && expectedRange) return !!salaryOption(expected, [actual]);
     }
     if (/排名/.test(label)) return !!rankOption(expected, [actual]);
+    if (/^(?:奖项|获奖|奖励)(?:等级|名次)$/.test(label) && awardResultOption(expected, [actual])) return true;
     if (proficiencyOption(expected, [actual], label)) return true;
     const actualDate = dateParts(actual); const expectedDate = dateParts(expected);
     return actualDate.length >= 2 && expectedDate.length >= 2
@@ -2745,6 +2939,10 @@
     if (isLocationLabel(label) && (target.tagName === "SELECT" && !target.multiple || confirmedSingleLocationSources.get(target) === String(expected)))
       expected = String(expected).split(/[、,，;；]/).map(part => part.trim()).filter(Boolean)[0] || expected;
     if (pendingSuggestions.has(target) || pageValidationFailed(target)) return false;
+    if (isCheckbox(target)) {
+      const checked = checkboxExpected(expected, fieldTitle(target));
+      if (checked !== null) return target.getAttribute('aria-checked') !== 'mixed' && checkboxChecked(target) === checked;
+    }
     if (target.matches(".phoenix-radio-group")) return normalize(controlValue(target)) === normalize(expected);
     if (/日期|时间|年月/.test(label) && dateParts(expected).length >= 2) return dateValueMatches(target, expected);
     if (target.tagName === "SELECT" && normalize(target.selectedOptions[0]?.textContent) === normalize(expected)) return true;
@@ -2757,7 +2955,8 @@
     const box = fieldContainer(target);
     const range = target?.closest?.("[class*='picker'][class*='range'], [class*='date-editor'][class*='range']");
     const inputs = [...(box?.querySelectorAll("input") || [])].filter(visible);
-    const peers = range || inputs.length === 2 && inputs.every(input => /开始|结束|start|end/i.test(datePartText(input))) ? inputs : [];
+    const fullRange = fullDateRange(target);
+    const peers = fullRange.length === 2 ? fullRange : range || inputs.length === 2 && inputs.every(input => /开始|结束|start|end/i.test(datePartText(input))) ? inputs : [];
     const choicePeers = inputs.length === 2 && inputs.every(isChoiceControl) ? inputs : [];
     const selectedRoot = choiceRoot(target);
     return [...(box?.querySelectorAll('[role=alert], [class*="feedback"], [class*="error"], [class*="invalid"]') || [])]
@@ -2798,10 +2997,13 @@
     let changed;
     if (pendingEnd) {
       const start = await choose(label, value, target, false, { ...applyOptions, keepDateRangeOpen: true });
-      changed = (start || lastChoice?.rangeStartPending) && await choose("结束时间", applyOptions.rangeEnd, range[1], false, { ...applyOptions, keepExistingCalendar: true })
+      // ponytail: reuse a calendar only for an uncommitted shared range; independent endpoints activate their own picker.
+      const keepExistingCalendar = !!lastChoice?.rangeStartPending;
+      changed = (start || keepExistingCalendar) && await choose("结束时间", applyOptions.rangeEnd, range[1], false, { ...applyOptions, keepExistingCalendar })
         && dateValueMatches(resolveField(handle), value) && dateValueMatches(range[1].isConnected ? range[1] : resolveField(elementKeys.get(range[1])), applyOptions.rangeEnd);
     } else changed =
-      splitDate ? await choose(label, value, target, false, applyOptions)
+      isCheckbox(target) ? setValue(target, value)
+      : splitDate ? await choose(label, value, target, false, applyOptions)
       : autocompleteText ? isLocationLabel(label) ? await choose(label, value, target, false, applyOptions) : await writeAndObserveSuggestion(label, value, target, applyOptions)
         : target.tagName === "INPUT" && !isChoiceControl(target) ? await writeAndObserveSuggestion(label, value, target, applyOptions)
           : setValue(target, value) || await choose(label, value, target, false, applyOptions);
@@ -2818,6 +3020,7 @@
       lastChoice = { ...(lastChoice || {}), confirmed: false, failure: "page-validation-failed" }; return false;
     }
     const selected = pendingEnd ? value : lastChoice?.selectedValue || value;
+    if (isCheckbox(target) && checkboxExpected(selected, fieldTitle(target)) !== null) return fieldValueMatches(target, selected, label);
     if (valueMatches(controlValue(target, originalBox), selected, label)) {
       if (autocompleteText && lastChoice?.confirmed && lastChoice?.selectedValue) pendingSuggestions.delete(target);
       return true;
@@ -2849,7 +3052,7 @@
     const buttonInSection = (el) => {
       if (!section) return true;
       if (anchor === "语言类型" && languageCategoryButton(el)) return true;
-      if (["获奖经历", "竞赛", "荣誉"].includes(section) && !inSection(el, section)) return false;
+      if (!inSection(el, section)) return false;
       const title = normalize(sectionTitle(el));
       return !title || matchesSection(title, section) || !hasKnownSection(title) && ownedRows.some(row => row.contains(el));
     };
@@ -2891,11 +3094,14 @@
       const direct = [atsxButton, directButton].find(button => button && visible(button) && buttonInSection(button) && !uploadControl(button));
       const enabled = (button) => !button.disabled && button.getAttribute('aria-disabled') !== 'true';
       const usable = candidates.filter(enabled);
-      const button = direct && enabled(direct) ? direct : usable.length === 1 ? usable[0] : null;
+      const exact = usable.filter(el => [wanted, normalize(section)].includes(normalize(buttonCaption(el)).replace(/^[+＋]?(?:添加|新增)/, '')));
+      const preferred = exact.length ? exact : usable;
+      const button = direct && enabled(direct) ? direct : preferred.length === 1 ? preferred[0] : null;
       if (!button) return finish(usable.length > 1 ? 'record-add-owner-ambiguous' : candidates.length || direct ? 'record-add-disabled' : 'record-add-button-not-found',
         { candidates: candidates.slice(0, 8).map(el => ({ label: buttonCaption(el).slice(0, 40), module: sectionTitle(el), enabled: enabled(el) })) });
       const click = {};
-      await clickOption(button, true, () => countFields() > existing, click);
+      // A delivered add click must not be replayed while waiting for its new row.
+      await clickOption(button, true, null, click);
       clicks++;
       const next = await waitFor(() => {
         const current = countFields();
@@ -2977,13 +3183,14 @@
     const internships = await addRows("实习经历", counts?.internships || 0, "公司名称", [/(?:添加|新增).*实习.*经历/], "实习经历");
     const projects = await addRows("项目经历", counts?.projects || 0, "项目名称", [/(?:添加|新增).*项目.*(?:经历|经验)/], "项目经验");
     const cadres = await addRows("学生干部经历", counts?.cadres || 0, "职务", [/(?:添加|新增).*(?:(?:学生|干部|校园|社团).*经历|在校实践|校内实践)/], "学生干部经历");
+    const clubs = await addRows("社团经历", counts?.clubs || 0, "职务", [/(?:添加|新增).*社团.*(?:经历|经验)/], "社团经历");
     const englishCertificates = await addRows("英语能力", counts?.englishCertificates || 0, "证书名称", [/添加.*英语.*能力/], "英语能力");
     const certificates = await addRows("证书", counts?.certificates || 0, "证书名称", [/添加.*证书/], "证书");
     const skills = await addRows("技能", counts?.skills || 0, "技能名称", [/(?:添加|新增).*(?:技能|计算机能力)/], "技能");
     const unifiedAwards = await addRows("获奖情况", counts?.awards || 0, "获奖项", [/(?:添加|新增).*(?:奖励活动|获奖|奖项|荣誉)/], "获奖经历");
     const competitions = await addRows("竞赛", counts?.competitions || 0, "获奖项", [/(?:添加|新增).*(?:竞赛|大赛|比赛)/], "竞赛");
     const honors = await addRows("荣誉", counts?.honors || 0, "获奖项", [/(?:添加|新增).*(?:奖励|荣誉|奖学金)/], "荣誉");
-    return { education, languages, work, internships, projects, cadres, englishCertificates, certificates, skills, awards: unifiedAwards + competitions + honors, competitions, honors, diagnostics: rowAddDiagnostics };
+    return { education, languages, work, internships, projects, cadres, clubs, englishCertificates, certificates, skills, awards: unifiedAwards + competitions + honors, competitions, honors, diagnostics: rowAddDiagnostics };
   }
 
   async function fill(profile, options = {}) {
@@ -2993,7 +3200,7 @@
     const onlyEmpty = !!options.onlyEmpty;
     const expectedEmpty = new Map();
     const noteEmpty = (field, value, label) => {
-      if (field && value != null && value !== "" && !controlValue(field)) expectedEmpty.set(rememberField(field), { value, label });
+      if (field && value != null && value !== "" && (!controlValue(field) || isCheckbox(field) && isFullTimeLabel(fieldTitle(field)))) expectedEmpty.set(rememberField(field), { value, label });
     };
     const formatNumberedText = (value) => String(value || "").replace(/(^|\n)\s*(\d+)[.、)]\s*\n\s*/g, "$1$2. ");
     const mergedWorkText = (row) => {
@@ -3001,6 +3208,12 @@
       const highlights = formatNumberedText(row?.highlights).replace(/^\s*(?:亮点|工作亮点|工作业绩|工作成果|业绩亮点|工作成就)\s*[：:]\s*/, "").trim();
       return [duties && `职责：\n${duties}`, highlights && `亮点：\n${highlights}`].filter(Boolean).join("\n");
     };
+    const mergedProjectText = (parts, separator = '\n') => parts.filter(([, value]) => String(value || '').trim())
+      .map(([label, value]) => {
+        const text = String(value).trim().replace(/^(?:项目描述|项目简介|项目内容|项目说明|项目职责|项目中职责|核心职责|项目成果|职责|描述|成果)\s*[：:]\s*/, '');
+        // Empty separator reproduces previous generated text for exact-match repairs.
+        return `${label}：${separator}${separator ? text.replace(/^(?:项目亮点|亮点)\s*[：:]\s*/, '') : text}`;
+      }).join('\n');
     const usedFields = new Set();
     const deferredFields = [];
     const deferChoice = (field) => {
@@ -3066,19 +3279,19 @@
       structuredAttempts: [], targetFields: [], experienceLocations: []
     };
     const highestRows = (profile.education || []).filter((row) => degreeRank(row?.degree) > 0 && degreeRank(row.degree) === degreeRank(highestDegree));
-    for (const [label, key] of [["最高学历学校", "school"], ["最高学历专业", "major"], ["最高学历毕业日期", "end"], ["预计毕业时间", "end"], ["毕业学校", "school"], ["毕业院校", "school"], ["毕业学院", "college"], ["毕业院系", "college"], ["毕业学校专业", "major"], ["毕业专业", "major"], ["毕业时间", "end"], ["学习形式", "training"]]) {
-      const targets = fields().filter((field) => normalize(fieldTitle(field).replace(/[＊*]/g, "")) === normalize(label)
+    for (const [label, key] of [["最高学历学校", "school"], ["最高学历专业", "major"], ["最高学历毕业日期", "end"], ["预计毕业时间", "end"], ["毕业学校", "school"], ["毕业院校", "school"], ["毕业学院", "college"], ["毕业院系", "college"], ["毕业学校专业", "major"], ["毕业专业", "major"], ["毕业时间", "end"], ["学习形式", "training"], ['全日制', '_fullTime']]) {
+      const targets = fields().filter((field) => (key === '_fullTime' ? isCheckbox(field) && isFullTimeLabel(fieldTitle(field)) : normalize(fieldTitle(field).replace(/[＊*]/g, "")) === normalize(label))
         && !/教育(?:背景|经历)|学历经历/.test(moduleTitle(field)));
       if (!targets.length) continue;
       const detail = { key: targets.length === 1 ? rememberField(targets[0]) : "", label, section: "最高学历", row: 1 };
       if (targets.length !== 1 || highestRows.length !== 1) {
         diagnostics.structuredAttempts.push({ ...detail, reason: "ambiguous-highest-education" }); continue;
       }
-      const field = targets[0]; const value = highestRows[0][key];
+      const field = targets[0]; const value = key === '_fullTime' ? fullTimeValue(highestRows[0].training) : highestRows[0][key];
       if (!value) { diagnostics.structuredAttempts.push({ ...detail, reason: "profile-value-missing" }); continue; }
       noteEmpty(field, value, label);
-      if (controlValue(field)) {
-        skippedFields.push(label); diagnostics.structuredAttempts.push({ ...detail, reason: "page-value-protected", matchesSource: valueMatches(controlValue(field), value, label) }); continue;
+      if (controlValue(field) && !(key === '_fullTime' && value === 'false')) {
+        skippedFields.push(label); diagnostics.structuredAttempts.push({ ...detail, reason: "page-value-protected", matchesSource: isCheckbox(field) ? fieldValueMatches(field, value, label) : valueMatches(controlValue(field), value, label) }); continue;
       }
       if (await applyValue(label, value, field)) {
         usedFields.add(field); filled++; filledFields.push(label); diagnostics.structuredAttempts.push({ ...detail, reason: "filled", choice: lastChoice });
@@ -3111,13 +3324,16 @@
     const certificates = profile.certificates || [];
     diagnostics.structuredAttempts.push(...prepared.diagnostics);
     const awardTitles = moduleTitles().join(" ");
+    const separateCadres = /学生干部经历/.test(awardTitles) && /社团经历/.test(awardTitles);
+    const cadreRows = (profile.cadres || []).filter(row => !separateCadres || clean(row.level) !== '社团');
+    const clubRows = separateCadres ? (profile.cadres || []).filter(row => clean(row.level) === '社团') : [];
     const competitions = (profile.awards || []).filter(competitionAward);
     // Generic honor sections are the only award destination on many forms;
     // keep explicit contest names usable there when no contest section exists.
     const honors = /竞赛|大赛|比赛/.test(awardTitles)
       ? (profile.awards || []).filter(item => !competitionAward(item))
       : (profile.awards || []);
-    if (!options.rowsPrepared) diagnostics.rows = await ensureRows({ education: profile.education?.length, languages: profile.languages?.length, work: workRows.length, internships: internshipRows.length, projects: profile.projects?.length, cadres: profile.cadres?.length, englishCertificates: englishCertificates.length, certificates: certificates.length, skills: profile.skills?.length, awards: profile.awards?.length, competitions: competitions.length, honors: honors.length });
+    if (!options.rowsPrepared) diagnostics.rows = await ensureRows({ education: profile.education?.length, languages: profile.languages?.length, work: workRows.length, internships: internshipRows.length, projects: profile.projects?.length, cadres: cadreRows.length, clubs: clubRows.length, englishCertificates: englishCertificates.length, certificates: certificates.length, skills: profile.skills?.length, awards: profile.awards?.length, competitions: competitions.length, honors: honors.length });
     const describeTarget = (field, method) => field ? {
       method, label: fieldTitle(field) || labelText(field), element: field.tagName.toLowerCase(), module: moduleTitle(field),
       repeatIndex: repeatIndex(field, fieldTitle(field) || labelText(field)), currentValue: controlValue(field), targetIndex: fields().indexOf(field)
@@ -3152,17 +3368,18 @@
       return [...matched.map(row => row === undefined ? remaining.shift() : row && matched.filter(other => other === row).length > 1 ? null : row), ...remaining];
     };
     const groups = [
-      [profile.education, [["学历类型", "training"], ["学历", "degree"], ["学校名称", "school"], ["学校所在城市", "location"], ["学院名称", "college"], ["专业名称", "major"], ["开始时间", "start"], ["结束时间", "end"], ["GPA类型", "gpaType"], ["GPA", "gpa"], ["成绩排名", "rank"]], "学校名称", "教育背景"],
+      [profile.education, [["学历类型", "training"], ["学历", "degree"], ["学校名称", "school"], ["全日制", "_fullTime"], ["学校所在城市", "location"], ["学院名称", "college"], ["专业名称", "major"], ["开始时间", "start"], ["结束时间", "end"], ["GPA类型", "gpaType"], ["GPA", "gpa"], ["成绩排名", "rank"], ["荣誉奖项", "honors"]], "学校名称", "教育背景"],
       [englishCertificates, certificateMapping, "证书名称", "英语能力"],
       [certificates, certificateMapping, "证书名称", "证书"],
       [profile.skills, [["技能名称", "name"], ["掌握程度", "proficiency"], ["使用时间总计", "duration"], ["技能描述", "description"]], "技能名称", "技能"],
       [profile.languages, [["语言类型", "language"], ["掌握程度", "proficiency"], ["听说", "speaking"], ["读写", "reading"]], "语言类型", "语言能力"],
       [workRows, [["公司名称", "company"], ["所在部门", "department"], ["职位名称", "title"], ["工作性质", "workType"], ["开始时间", "start"], ["结束时间", "end"], ["月薪(税前)", "salary"], ["工作地点", "location"], ["离职原因", "reason"], ["工作描述", "description"], ["工作职责", "description"], ["工作亮点", "highlights"]], "公司名称", "工作经历"],
       [internshipRows, [["公司名称", "company"], ["所在部门", "department"], ["职位名称", "title"], ["工作性质", "workType"], ["开始时间", "start"], ["结束时间", "end"], ["月薪(税前)", "salary"], ["工作地点", "location"], ["离职原因", "reason"], ["工作描述", "description"], ["工作职责", "description"], ["工作亮点", "highlights"]], "公司名称", "实习经历"],
-      [profile.projects, [["项目名称", "name"], ["项目职务", "role"], ["项目职责", "responsibilities"], ["开始时间", "start"], ["结束时间", "end"], ["项目链接", "link"], ["项目描述", "description"], ["项目成果", "outcomes"]], "项目名称", "项目经验"],
-      [profile.cadres, [["职务", "position"], ["级别", "level"], ["开始时间", "start"], ["结束时间", "end"], ["工作职责", "duty"]], "职务", "学生干部经历"],
+      [profile.projects, [["项目名称", "name"], ["项目职务", "role"], ["项目职责", "responsibilities"], ["开始时间", "start"], ["结束时间", "end"], ["项目链接", "link"], ["项目描述", "description"], ["项目亮点", "outcomes"]], "项目名称", "项目经验"],
+      ...[[cadreRows, "学生干部经历"], [clubRows, "社团经历"]].map(([rows, section]) =>
+        [rows, [["职务", "position"], ["级别", "level"], ["开始时间", "start"], ["结束时间", "end"], ["工作职责", "duty"]], "职务", section]),
       ...[[profile.awards, "获奖经历"], [competitions, "竞赛"], [honors, "荣誉"]].map(([rows, section]) =>
-        [rows, [["获奖类型", "_type"], ["获奖项", "name"], ["获奖时间", "date"], ["获奖级别", "level"], ["获奖描述", "description"]], "获奖项", section])
+        [rows, [["获奖类型", "_type"], ["获奖项", "name"], ["奖项等级", "_prize"], ["获奖时间", "date"], ["获奖级别", "level"], ["获奖描述", "description"]], "获奖项", section])
     ];
     for (const [sourceRows, mapping, anchor, section] of groups) {
       const rows = alignRows(sourceRows, mapping, anchor, section);
@@ -3170,6 +3387,7 @@
         const row = rows[index];
         if (!row) continue;
         const parts = anchor === "项目名称" ? projectParts(row) : null;
+        const projectOutcome = parts && (row.outcomes || row.highlights);
         let startDateConfirmed = true;
         let languageTypeConfirmed = anchor !== "语言类型";
         let awardTypeConfirmed = anchor !== "获奖项" || !rowField(anchor, index, "获奖类型", section);
@@ -3179,10 +3397,13 @@
         const gpaType = row.gpaType || row.gpaScale || explicitScale;
         for (const [label, key] of mapping) {
           let value = key === "_exam" ? certificateExam(row?.name)
+            : key === "_fullTime" ? fullTimeValue(row?.training)
             : key === "_type" ? row?.type || row?.category || (/奖学金/.test(row?.name || "") ? "奖学金" : competitionAward(row) ? "竞赛" : row?.name)
             : key === "_score" ? certificateScore(row)
+            : key === "_prize" ? awardPrize(row)
             : label === "项目职责" ? row?.responsibilities || parts?.responsibilities
             : label === "项目描述" ? parts?.summary || row?.summary || row?.description
+            : label === "项目亮点" ? projectOutcome
             : label === "成绩排名" ? row?.rank || String(row?.gpa || "").match(/\d+(?:\.\d+)?\s*%/)?.[0]
             : label === "GPA类型" ? gpaType
             : label === "GPA" && gpaScaleAgrees ? gpaFraction[1]
@@ -3191,9 +3412,15 @@
             : (sourceRows === workRows || sourceRows === internshipRows) && (label === "工作描述" || label === "工作职责") ? formatNumberedText(row?.description)
             : key === "highlights" ? formatNumberedText(row?.[key])
             : row?.[key];
-          const field = rowField(anchor, index, label, section, value);
+          // ponytail: resolve prose controls after each write; portals can rebuild the record.
+          const projectFields = parts && /^项目(?:描述|职责|亮点)$/.test(label) && Object.fromEntries(['项目描述', '项目职责', '项目亮点'].map(label => [label, rowField(anchor, index, label, section)]));
+          if (projectFields) {
+            if (projectFields['项目职责'] === projectFields['项目描述']) projectFields['项目职责'] = null;
+            if ([projectFields['项目描述'], projectFields['项目职责']].includes(projectFields['项目亮点'])) projectFields['项目亮点'] = null;
+          }
+          const field = projectFields ? projectFields[label] : rowField(anchor, index, label, section, value);
           if (label === "GPA类型" && field?.type === "number") value = String(gpaType).match(/^(\d+(?:\.\d+)?)(?:分制)?$/)?.[1] || "";
-          if (key === "_type" && !field) continue;
+          if ((key === "_type" || key === "_prize" || key === '_fullTime') && !field) continue;
           if (key === "_type" && !isChoiceControl(field)) value = row?.type || row?.category;
           if ((sourceRows === workRows || sourceRows === internshipRows) && (label === "工作描述" || label === "工作职责")) {
             const highlightsField = rowField(anchor, index, "工作亮点", section);
@@ -3202,14 +3429,24 @@
           if (label === "GPA" && field?.type === "number") {
             value = String(value ?? "").trim().match(/^(\d+(?:\.\d+)?)\s*\/\s*\d+(?:\.\d+)?\s*%$/)?.[1] || value;
           }
-          if (field && label === "项目描述" && !rowField(anchor, index, "项目职责", section)) {
-            const text = row?.description || row?.summary || "";
-            value = [text, row?.responsibilities && !text.includes(row.responsibilities) ? row.responsibilities : ""].filter(Boolean).join("\n");
+          let previousProjectTexts = [];
+          if (field && label === '项目职责' && !projectFields['项目亮点'] && projectOutcome) {
+            previousProjectTexts = [parts.responsibilities, mergedProjectText([['职责', parts.responsibilities], ['成果', projectOutcome]], '')];
+            value = mergedProjectText([['职责', parts.responsibilities], ['亮点', projectOutcome]]);
+          }
+          if (field && label === '项目描述' && !projectFields['项目职责'] && (parts.responsibilities || !projectFields['项目亮点'] && projectOutcome)) {
+            const text = row.description || row.summary || '';
+            previousProjectTexts = [[text, row.responsibilities && !text.includes(row.responsibilities) ? row.responsibilities : ''].filter(Boolean).join('\n'),
+              mergedProjectText([['职责', parts.responsibilities], ['描述', parts.summary], ['成果', !projectFields['项目亮点'] && projectOutcome]], ''),
+              mergedProjectText([['描述', parts.summary], ['职责', parts.responsibilities], ['成果', !projectFields['项目亮点'] && projectOutcome]], '')];
+            value = mergedProjectText([['描述', parts.summary], ['职责', parts.responsibilities], ['亮点', !projectFields['项目亮点'] && projectOutcome]]);
           }
           noteEmpty(field, value, label);
           const isWorkText = (sourceRows === workRows || sourceRows === internshipRows) && /工作内容|工作描述|工作职责|工作亮点|工作成果|业绩亮点/.test(label);
           const repairPartialWorkText = isWorkText && key === "description" && row?.highlights && value === mergedWorkText(row)
             && formatNumberedText(controlValue(field)).trim() === formatNumberedText(row?.description).trim();
+          const repairPartialProjectText = previousProjectTexts.some(text => text && text !== value && String(field?.value ?? field?.innerText ?? '').trim() === text.trim());
+          if (field && (repairPartialWorkText || repairPartialProjectText)) expectedEmpty.set(rememberField(field), { value, label });
           const fieldName = `${section}[${index + 1}].${label}`;
           const targetLabel = field ? (fieldTitle(field) || labelText(field)) : "";
           const detail = { key: field ? rememberField(field) : "", section, row: index + 1, company: row?.company || "", label, value: String(value || ""), datePartCount: /时间/.test(label) ? dateParts(value).length : 0, dateControlCount: /时间/.test(label) && field ? dateControls(field).length : 0, targetIndex: field ? fields().indexOf(field) : -1, targetLabel, targetRepeatIndex: field ? repeatIndex(field, targetLabel) : -1 };
@@ -3234,8 +3471,8 @@
             if (/月薪|工作地点|获奖时间|成绩排名/.test(label)) diagnostics.structuredAttempts.push({ ...detail, reason: "profile-value-missing" });
             continue;
           }
-          if (onlyEmpty && field && controlValue(field) && !repairPartialWorkText) {
-            detail.matchesSource = valueMatches(controlValue(field), value, label);
+          if (onlyEmpty && field && controlValue(field) && !repairPartialWorkText && !repairPartialProjectText && !(key === '_fullTime' && value === 'false')) {
+            detail.matchesSource = isCheckbox(field) ? fieldValueMatches(field, value, label) : valueMatches(controlValue(field), value, label);
             if (key === "_type") awardTypeConfirmed = detail.matchesSource;
             if (label === "语言类型") languageTypeConfirmed = valueMatches(controlValue(field), value, label);
             if (/开始时间/.test(label)) {
@@ -3275,7 +3512,7 @@
       const field = resolveField(key);
       const descriptor = finalFields.get(key);
       return { key, label, module: descriptor?.module || "", row: descriptor ? descriptor.repeatIndex + 1 : 0,
-        confirmed: !!field && (/日期|时间/.test(label) && dateParts(value).length >= 2 ? dateValueMatches(field, value) : valueMatches(controlValue(field), value, label)) };
+        confirmed: !!field && (isCheckbox(field) ? fieldValueMatches(field, value, label) : /日期|时间/.test(label) && dateParts(value).length >= 2 ? dateValueMatches(field, value) : valueMatches(controlValue(field), value, label)) };
     });
     diagnostics.confirmedEmpty = diagnostics.emptyTargets.filter((target) => target.confirmed).length;
     const confirmedKeys = new Set(diagnostics.emptyTargets.filter(target => target.confirmed).map(target => target.key));
@@ -3306,7 +3543,7 @@
     panel.id = "resume-autofill-page-action";
     panel.dataset.resumeAutofillUi = "true";
     panel.dataset.contentProtocol = String(CONTENT_PROTOCOL);
-    panel.dataset.contentBuild = "100-add-entry-owner";
+    panel.dataset.contentBuild = CONTENT_BUILD;
     panel.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 32px);box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;gap:8px;padding:12px;background:white;color:#173e30;border:1px solid #b5d8c7;border-radius:10px;font:14px system-ui;box-shadow:0 4px 18px #0002";
     if (typeof visible === "boolean") panel.dataset.pageActionVisible = String(visible);
     if (panel.dataset.pageActionVisible !== "true") panel.style.display = "none";
@@ -3408,7 +3645,7 @@
   }
   const contentListener = (message, _sender, sendResponse) => {
     const tasks = {
-      GET_FORM_SCHEMA: async () => ({ fields: formSchema(), modules: moduleTitles() }),
+      GET_FORM_SCHEMA: async () => ({ build: CONTENT_BUILD, fields: formSchema(), modules: moduleTitles() }),
       GET_LIVE_OPTIONS: async () => ({ fields: await liveOptions(message.keys, !!message.keepOpen, message.previousOptions) }),
       ENSURE_ROWS: () => ensureRows(message.counts),
       PREPARE_PROFILE: () => prepareProfile(message.profile, message.corrections),

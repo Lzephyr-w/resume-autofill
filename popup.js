@@ -194,7 +194,7 @@ function parseExperienceRows(body, project = false) {
   const rows = [];
   // A detail line can be followed by a date in copied documents.  It is not
   // a new entry header; accepting it creates phantom project/work rows.
-  const detailLine = (line) => /^(?:摘要|描述|项目描述|项目简介|项目内容|项目成果|职责|项目职责|项目中职责|工作职责|工作内容|工作描述|亮点|工作亮点|工作成果|业绩亮点|成果|负责|使用|基于|实现|参与|主导|github|ai使用)\s*[：:]/i.test(String(line || ""));
+  const detailLine = (line) => /^(?:摘要|描述|项目描述|项目简介|项目内容|项目成果|项目亮点|职责|项目职责|项目中职责|工作职责|工作内容|工作描述|亮点|工作亮点|工作成果|业绩亮点|成果|负责|使用|基于|实现|参与|主导|github|ai使用)\s*[：:]/i.test(String(line || ""));
   const formLabel = (line) => /^(?:起止时间|就读时间|获奖时间|公司名称|单位名称|职位名称|工作职责|项目名称|项目描述|学校名称|专业名称|学历)$/i.test(String(line || "").replace(/[：:]\s*$/, ""));
   const likelyProjectHeader = (line) => !detailLine(line) && !formLabel(line) && !/^(?:\d+[.)、]|[•●▪◦*-])\s*/.test(String(line || ""));
   const starts = (index) => {
@@ -260,9 +260,9 @@ function parseExperienceRows(body, project = false) {
         responsibilities.push(heading);
         continue;
       }
-      if (project && /^项目成果[：:]/.test(heading)) {
+      if (project && /^(?:项目)?(?:亮点|成果)[：:]/.test(heading)) {
         inOutcomes = true;
-        const value = heading.replace(/^项目成果[：:]\s*/, "");
+        const value = heading.replace(/^(?:项目)?(?:亮点|成果)[：:]\s*/, "");
         if (value) outcomes.push(value);
         continue;
       }
@@ -351,6 +351,8 @@ function parseText(text) {
     const studentId = findValue(educationLines, ["学号"]);
     const startValue = findValue(educationLines, ["就读日期", "入学日期", "开始时间"]);
     const endValue = findValue(educationLines, ["毕业日期", "结束时间"]);
+    const singleEducation = educationLines.filter(line => /^(?:学校(?:名称)?|院校(?:名称)?|毕业院校|就读院校)\s*(?:[：:]|$)|^[^：:]+(?:大学|学院)\s*$/.test(line)).length <= 1
+      && (educationBody.match(new RegExp(monthRange.source, 'g')) || []).length <= 1;
     const dateParts = educationDate?.[0].match(monthRange)?.slice(1, 3) || [];
     const school = schoolValue || before.find((line) => /大学|学院/.test(line)) || "";
     const majorLine = before.find((line) => line.includes("|") && /计算机|软件|信息|技术|工程|专业/.test(line)) || "";
@@ -360,7 +362,7 @@ function parseText(text) {
     const college = collegeValue || (parts.length > 1 ? parts[0] : "");
     const gpaText = educationBody.match(/GPA\s*[：:]?\s*([^\n]+)/i)?.[1]?.trim() || "";
     const rank = educationBody.match(/(?:专业排名|排名)\s*[：:]?\s*([^\n]+)/)?.[1]?.trim() || gpaText.match(/\/\s*(\d+(?:\.\d+)?%)/)?.[1] || "";
-    p.education.push({ school: school.replace(/^学校[：:]\s*/, "").replace(/\s*(计算机学院|软件学院|信息学院)$/, ""), college, major, degree: degreeValue || before.find((line) => /本科|硕士|博士|大专/.test(line))?.replace(/^(?:学历|学位)[：:]\s*/, "") || "", studentId, start: startValue || dateParts[0] || "", end: endValue || dateParts[1] || "", gpa: gpaText, rank, training: findValue(educationLines, ["培养方式", "学习形式", "学习方式", "就读方式", "学历类型", "受教育类型"]) });
+    p.education.push({ school: school.replace(/^学校[：:]\s*/, "").replace(/\s*(计算机学院|软件学院|信息学院)$/, ""), college, major, degree: degreeValue || before.find((line) => /本科|硕士|博士|大专/.test(line))?.replace(/^(?:学历|学位)[：:]\s*/, "") || "", studentId, start: startValue || dateParts[0] || "", end: endValue || dateParts[1] || "", gpa: gpaText, rank, training: findValue(educationLines, ["培养方式", "学习形式", "学习方式", "就读方式", "学历类型", "受教育类型"]), honors: singleEducation ? findValue(educationLines, ['荣誉奖项', '荣誉奖励', '获奖情况']) : '' });
   }
   p.work = parseExperienceRows(sectionBody(source, ["工作经历"]));
   p.internships = parseExperienceRows(sectionBody(source, ["实习经历"]));
@@ -415,6 +417,9 @@ function fieldLabel(field) {
     .map((item) => item.trim()).filter((item) => item && item !== "请选择");
   return ([...new Set(parts)][0] || "").replace(/[＊*]/g, "").replace(/^(?:请选择|请输入|请填写)(?:您的?|你(?:的)?)?/, "");
 }
+const isFullTimeLabel = label => /^(?:(?:是否(?:为|属于)?)?全日制(?:学历|教育|学习)?|(?:is)?fulltime)$/.test(String(label || '').toLowerCase().replace(/[：:（）()\s_＊*?？-]/g, ''));
+const fullTimeValue = value => /非全日制|非脱产|在职|函授|业余|网络教育|远程教育|自学考试|自考/.test(String(value || '')) ? 'false'
+  : /全日制|全脱产|^脱产$/.test(String(value || '').trim()) ? 'true' : '';
 function missingFieldLabels(missingFields, fields) {
   const pageLabels = (fields || []).map(fieldLabel).filter(Boolean);
   return [...new Set(missingFields || [])].reduce((result, label) => {
@@ -424,11 +429,12 @@ function missingFieldLabels(missingFields, fields) {
   }, { unresolved: [], unavailable: [] });
 }
 const combinedExperience = (title) => /工作\s*(?:[\/／、]|与|及|和)\s*实习|实习\s*(?:[\/／、]|与|及|和)\s*工作/.test(title || "");
-function uniqueEmptyFields(fields) {
+function uniqueEmptyFields(fields, profile) {
   const seen = new Set();
   return (fields || []).filter(Boolean).filter((field) => {
     if (field.currentValue) return false;
     const label = fieldLabel(field);
+    if (profile && field.type === 'checkbox' && isFullTimeLabel(label) && field.checked === false && !field.required && localCandidate(field, profile) === 'false') return false;
     if (field.type === "checkbox" && /至今|现在|在职|没有|无.*(?:经历|经验|成果)|承诺|认同|同意|已阅读/.test(label)) return false;
     // Navigation/search controls are editable page chrome, not application fields.
     if (!label || /^(?:首页|home|搜索|search|登录|login|搜索(?:职位|岗位|工作)?关键词|(?:职位|岗位|工作)关键词)$/i.test(label)) return false;
@@ -466,7 +472,7 @@ function aiFieldContext(field, profile) {
   const awardSource = /获奖类型|奖励类型|奖项(?:类别|类型)/.test(label) ? (sources.find(source => /\.name$/.test(source.path) && /奖学金/.test(source.value))
     || sources.find(source => /\.(?:type|category)$/.test(source.path)) || sources.find(source => /\.name$/.test(source.path)))?.value : "";
   const awardLevelSource = /(?:获奖|奖励|奖项|大赛|比赛|竞赛)(?:级别|等级)/.test(label) ? sources.find(source => /\.level$/.test(source.path))?.value : "";
-  const awardName = /荣誉名称|获奖大赛|竞赛名称/.test(label) ? sources.find(source => /\.name$/.test(source.path))?.value : "";
+  const awardName = /荣誉名称|获奖大赛|竞赛名称|大赛名称|比赛名称/.test(label) ? sources.find(source => /\.name$/.test(source.path))?.value : "";
   const certificateNames = label === '证书名称' ? sources.filter(source => /^certificates\[\d+\]\.name$/.test(source.path)) : [];
   const certificateName = certificateNames.length === 1 ? certificateNames[0].value : '';
   const customSource = sources.find(source => source.path === `customFields[${JSON.stringify(label.replace(/[＊*]/g, ""))}]`)?.value;
@@ -567,7 +573,8 @@ function profileSources(field, profile, ignoreAwardMinimum = false) {
     const status = String(profile.workExperience || '').trim().match(/^(应届|往届)(?:生|毕业生)?$/)?.[1];
     return status ? [{path:'derived.graduateStatus',value:/^是否/.test(label) ? status === '应届' ? '是' : '否' : status}] : [];
   }
-  const educationDetail = !/教育|学历/.test(module) && (/^(?:毕业时间|毕业日期|毕业年月|毕业年份)$/.test(label) ? 'end' : /^(?:学习形式|学习方式|就读方式|培养方式|学历类型|受教育类型)$/.test(label) ? 'training' : '');
+  if (field.type === 'checkbox' && /^(?:是否)?辅修$/.test(label)) return explicit;
+  const educationDetail = !/教育|学历/.test(module) && (/^(?:毕业时间|毕业日期|毕业年月|毕业年份)$/.test(label) ? 'end' : isFullTimeLabel(label) || /^(?:学习形式|学习方式|就读方式|培养方式|学历类型|受教育类型)$/.test(label) ? 'training' : '');
   const educationRecord = /教育(?:背景|经历)|学历经历/.test(module) || field.rowAnchor?.label === '学校名称';
   const schoolLocation = /(?:学校|院校)(?:所在)?(?:城市|地区)|就读地|学校所在地|院校所在地/.test(label);
   const graduationKey = !educationRecord && (schoolLocation ? 'location' : educationDetail || ({ '最高学历': 'degree', '毕业学校': 'school', '毕业院校': 'school', '毕业学院': 'college', '毕业院系': 'college', '毕业学校专业': 'major', '毕业专业': 'major', '最高学历学校': 'school', '最高学历专业': 'major', '最高学历毕业日期': 'end', '预计毕业时间': 'end' })[label]);
@@ -626,6 +633,7 @@ function profileSources(field, profile, ignoreAwardMinimum = false) {
   const awardSection = awardModule(narrative ? label : module || label);
   const groupRows = sourceRows.map((item, index) => ({ item, index })).filter(({ item }) =>
     group === "awards" ? awardSection === "竞赛" ? competitionAward(item) : awardSection === "荣誉" ? !competitionAward(item) : true
+      : group === 'cadres' && profile.separateCadres ? (String(item.level || '').trim() === '社团') === (/社团/.test(module) && !/干部/.test(module))
       : group !== "certificates" || !profile.separateEnglishCertificates || (/英语|英语能力/.test(module) === englishExam(item)));
   if (narrative && group) {
     const minimum = ignoreAwardMinimum ? -1 : awardMinimum(field);
@@ -634,7 +642,9 @@ function profileSources(field, profile, ignoreAwardMinimum = false) {
       .filter(({ item }) => group !== 'awards' || minimum < 0 || awardRank(item.level) >= minimum);
     const value = rows.map(({ item }) => {
       const header = [item.start && [item.start, item.end].filter(Boolean).join(" ~ "), item.date, item.company, item.name, item.title, item.role, item.position].filter(Boolean).join(" | ");
-      const details = [["职责", item.responsibilities || item.duty], ["描述", item.description || item.summary], ["成果", item.outcomes], ["亮点", item.highlights], ["级别", item.level], ["成绩", item.score]].filter(([, value]) => value).map(([key, value]) => `${key}：${value}`);
+      const details = (group === 'projects' ? [["描述", item.summary || item.description], ["职责", item.responsibilities], ["亮点", item.outcomes || item.highlights]]
+        : [["职责", item.responsibilities || item.duty], ["描述", item.description || item.summary], ["成果", item.outcomes], ["亮点", item.highlights], ["级别", item.level], ["成绩", item.score]])
+        .filter(([, value]) => value).map(([key, value]) => `${key}：${group === 'projects' ? '\n' + String(value).trim().replace(/^(?:项目(?:描述|简介|内容|说明|职责|成果|亮点)|核心职责|职责|描述|成果|亮点)\s*[：:]\s*/, '') : value}`);
       return [header, ...details].filter(Boolean).join("\n");
     }).filter(Boolean).join("\n\n");
     return value ? [{ path: `derived.${group}`, value }] : [];
@@ -689,6 +699,7 @@ function profileSources(field, profile, ignoreAwardMinimum = false) {
   if (group === "education" && /^(?:学院|院系|学院名称)$/.test(label)) return sources.filter(({ path }) => /\.college$/.test(path));
   if (group === "education" && /^(?:专业|专业名称|所学专业)$/.test(label)) return sources.filter(({ path }) => /\.major$/.test(path));
   if (group === 'education' && /^(?:荣誉奖项|荣誉奖励|荣誉|获奖情况)$/.test(label)) return explicit.length ? explicit : sources.filter(({path}) => /\.(?:honors|awards)$/.test(path));
+  if (group === 'awards' && /^(?:奖项说明|获奖说明|获奖描述|奖励描述|荣誉描述)$/.test(label)) return sources.filter(({path}) => /\.description$/.test(path));
   if (group === 'projects' && /^(?:项目名称|项目标题)$/.test(label)) return sources.filter(({path}) => /\.name$/.test(path));
   if (group && /^(?:开始(?:时间|日期|年月)|起始时间|入学(?:时间|年月))$/.test(label)) return sources.filter(({path}) => /\.start$/.test(path));
   if (group && /^(?:结束(?:时间|日期|年月)|终止时间|(?:预计)?毕业(?:时间|日期|年月|年份))$/.test(label)) return sources.filter(({path}) => /\.end$/.test(path));
@@ -710,10 +721,10 @@ function profileSources(field, profile, ignoreAwardMinimum = false) {
   if (/^(?:work|internships|experiences)$/.test(group) && /^(?:工作描述|工作职责)$/.test(label)) return sources.filter(({path}) => /\.(?:description|highlights)$/.test(path));
   if (group === 'cadres' && /^实践名称$/.test(label)) return sources.filter(({path}) => /\.position$/.test(path));
   if (group === 'cadres' && /^(?:实践描述|实践内容|实践说明|在校实践)$/.test(label)) return sources.filter(({path}) => /\.(?:duty|description)$/.test(path));
-  if (group === 'education' && /^(?:学习形式|学习方式|就读方式|培养方式|学历类型|受教育类型)$/.test(label)) return sources.filter(({path}) => /\.training$/.test(path));
+  if (group === 'education' && (isFullTimeLabel(label) || /^(?:学习形式|学习方式|就读方式|培养方式|学历类型|受教育类型)$/.test(label))) return sources.filter(({path}) => /\.training$/.test(path));
   if (group === 'education' && /^(?:学历|学位)$/.test(label)) return sources.filter(({path}) => /\.degree$/.test(path));
   if (group === 'education' && /^(?:成绩排名|专业排名)$/.test(label)) return sources.filter(({path}) => /\.rank$/.test(path));
-  if (group === "projects" && label === "项目成果") {
+  if (group === "projects" && /^(?:项目)?(?:亮点|成果)$/.test(label.replace(/[：:]\s*$/, ''))) {
     const explicit = sources.find(({ path }) => /\.outcomes$/.test(path)) || sources.find(({ path }) => /\.highlights$/.test(path));
     if (explicit) return [explicit];
     for (const key of ["responsibilities", "description", "summary"]) {
@@ -763,13 +774,13 @@ function profileSources(field, profile, ignoreAwardMinimum = false) {
   if (occupationCategoryField(field) || /期望从事职业|期望职业|期望职位|意向职位|目标职位|意向岗位/.test(fieldLabel(field))) return sources.filter(({ path }) => path === 'jobIntent["occupation"]');
   if (/^(?:期望工作城市|目标工作城市|期望城市|意向城市|工作意向城市|期望工作地点|期望地点)$/.test(label)) return sources.filter(source => source.path === 'jobIntent["city"]');
   if (group === 'awards' && /^(?:获奖时间|获奖日期|获得时间|获得日期|奖项时间)$/.test(label)) return sources.filter(source => /\.date$/.test(source.path));
-  if (group === 'awards' && /^(?:奖项|获奖|奖励)(?:等级|名次)$/.test(label) && !field.isChoice && /名次|几等奖|等第/.test(field.placeholder || '')) {
+  if (group === 'awards' && /^(?:(?:奖项|获奖|奖励)(?:等级|名次)|(?:大赛|竞赛|比赛)成绩)$/.test(label) && (field.isChoice ? field.options?.some(option => /(?:特|[一二三四五六七八九十\d]+)等奖|第[一二三四五六七八九十\d]+名|^top\s*\d+$|入围决赛/i.test(option)) : /名次|几等奖|等第/.test(field.placeholder || ''))) {
     const item = groupRows[row]?.item;
-    const prizes = [...new Set(`${item?.name || ''} ${item?.level || ''}`.match(/(?:特|[一二三四五六七八九十\d]+)等奖|第[一二三四五六七八九十\d]+名/g) || [])];
+    const prizes = [...new Set(`${item?.name || ''} ${item?.level || ''}`.match(/(?:特|[一二三四五六七八九十\d]+)等奖|第[一二三四五六七八九十\d]+名|top\s*\d+|入围决赛/gi) || [])];
     return prizes.length === 1 ? [{ path: `derived.awards[${groupRows[row].index}].prize`, value: prizes[0] }] : [];
   }
   if (/获奖类型|奖励类型|奖项(?:类别|类型)/.test(fieldLabel(field))) return sources.filter(({ path }) => /\.(?:name|type|category)$/.test(path));
-  if (/奖项名称|获奖项|获奖名称|荣誉名称|获奖大赛|竞赛名称/.test(fieldLabel(field))) return sources.filter(({ path }) => /\.name$/.test(path));
+  if (/奖项名称|获奖项|获奖名称|荣誉名称|获奖大赛|竞赛名称|大赛名称|比赛名称/.test(fieldLabel(field))) return sources.filter(({ path }) => /\.name$/.test(path));
   if (group === 'certificates' && label === '证书名称') return sources.filter(({ path }) => /\.name$/.test(path));
   if (/^(?:民族|民族类别|民族名称)$/.test(label)) return sources.filter(({ path }) => path === "nationality" || path === `customFields[${JSON.stringify(label)}]`);
   if (/^(?:(?:国籍|国家)(?:[\/／或（(]?地区[）)]?)?|country(?:[\/\s]*region)?)$/i.test(label)) return sources.filter(({ path }) => path === "countryRegion");
@@ -777,9 +788,10 @@ function profileSources(field, profile, ignoreAwardMinimum = false) {
 }
 const aiFailureReason = error => /TimeoutError|AbortError/.test(error?.name || '') ? 'ai-client-timeout'
   : error?.code === 'previous-failure' ? 'ai-skipped-after-failure'
-  : /^(?:upstream-\d{3}|model-timeout|model-output-invalid|match-invalid|config-missing|config-failed)$/.test(error?.code || '') ? `ai-${error.code}`
+  : /^(?:upstream-\d{3}|model-timeout|model-output-invalid|match-invalid|config-missing|config-failed|budget-exhausted)$/.test(error?.code || '') ? `ai-${error.code}`
   : error?.name === 'TypeError' ? 'ai-network-unavailable' : 'ai-service-unavailable';
-async function semanticMatch(fields, profile, timeoutMs = 10000) {
+const AI_MATCH_TIMEOUT_MS = 60000;
+async function semanticMatch(fields, profile, timeoutMs = AI_MATCH_TIMEOUT_MS) {
   const sourceMaps = new Map(fields.map((field) => [field.key, new Map(profileSources(field, profile).map(({ path, value }) => [path, value]))]));
   const payload = fields.slice(0, 120).map((field) => {
     const sources = sourceMaps.get(field.key);
@@ -815,6 +827,7 @@ async function semanticMatch(fields, profile, timeoutMs = 10000) {
     if (!semanticTextField(field) && !field.options?.includes(item.value)) return [];
     if (/^(?:毕业学校|毕业院校|最高学历学校|学校|院校|学校名称|学校全称|院校名称|就读学校)$/.test(fieldLabel(field)) && choiceToken(value) !== choiceToken(item.value)) return rejectValue(field, 'candidate-source-conflict');
     if (isAnnualSalaryField(field) && localCandidate(field, profile) !== item.value) return rejectValue(field, 'salary-range-not-confirmed');
+    if (field.type === 'checkbox' && isFullTimeLabel(fieldLabel(field)) && localCandidate(field, profile) !== item.value) return rejectValue(field, 'education-type-not-confirmed');
     if (!semanticTextField(field) && /^(?:国家[\/／]?地区|国家|证件类型|电话区号|手机区号|获奖类型|奖励类型|奖项类别|奖项类型|是否通过(?:大学)?英语四级|是否通过CET-?4|应届[\/／]?往届|应往届|毕业生类型|是否应届(?:毕业生)?|学历类型|受教育类型|培养方式|学习形式|学习方式|就读方式|最高学历|学历|学位|成绩排名|专业排名|语言|语种|语言名称|语言类型|语言类别|外语类别|听说(?:能力|水平)?|读写(?:能力|水平)?|掌握程度|熟练程度|精通程度|语言水平|等级自评)$/i.test(fieldLabel(field))) {
       const expected = localCandidate(field, profile);
       if (/^(?:语言|语言类型|语言类别|外语类别|语言名称|语种)$/.test(fieldLabel(field)) && expected !== item.value) return rejectValue(field, 'candidate-source-conflict');
@@ -823,7 +836,8 @@ async function semanticMatch(fields, profile, timeoutMs = 10000) {
     }
     if (programmingLanguageField(field) && !programmingOptionMentioned(semanticTextField(field) ? value : item.value, profileSources(field,profile))) return rejectValue(field,'programming-language-not-in-source');
     if (/^(?:奖学金类型|奖学金类别)$/.test(fieldLabel(field).replace(/[＊*]/g, "")) && scholarshipCandidate(field, profile) !== item.value) return rejectValue(field, "scholarship-type-not-confirmed");
-    if (/获奖大赛/.test(fieldLabel(field)) && choiceToken(value) !== choiceToken(item.value) && uniqueAnchorOption(value, field.options || []) !== item.value) return rejectValue(field, "competition-not-offered");
+    if (/^(?:获奖大赛|获奖项|竞赛名称|大赛名称|比赛名称)$/.test(fieldLabel(field)) && !semanticTextField(field) && localCandidate(field, profile) !== item.value) return rejectValue(field, "competition-not-offered");
+    if (item.profilePath.endsWith('.prize') && !semanticTextField(field) && localCandidate(field, profile) !== item.value) return rejectValue(field, 'award-rank-not-confirmed');
     if (field.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return rejectValue(field, "invalid-email-value");
     if (field.type === "number" && !Number.isFinite(Number(value))) return rejectValue(field, "invalid-number-value");
     if (/拼音|pinyin|英文(?:姓|名)|english[\s_-]*name/i.test([field.label, field.placeholder, field.id].join(" ")) && !/^[A-Za-z][A-Za-z '\-]*$/.test(value)) return rejectValue(field, "invalid-name-format");
@@ -910,6 +924,10 @@ const localCandidate = (field, profile) => {
   const value = singleLocationSource(field, sourceValue);
   const options = field.options || [];
   const wanted = choiceToken(value);
+  if (field.type === 'checkbox' && isFullTimeLabel(fieldLabel(field))) {
+    const state = fullTimeValue(value);
+    return options.includes(state) ? state : '';
+  }
   if (/^(?:电话|手机)区号$/.test(fieldLabel(field))) {
     const code = text => String(text || '').match(/(?:\+|\b00)(\d{1,4})(?!\d)/)?.[1]
       || String(text || '').match(/(?:^|\s)0?(\d{1,4})\s*$/)?.[1] || '';
@@ -949,12 +967,12 @@ const localCandidate = (field, profile) => {
       if (matches.length === 1) return matches[0];
     }
   }
-  if (/^(?:证书名称|竞赛名称|获奖项)$/.test(fieldLabel(field).replace(/[＊*]/g, ''))) {
+  if (/^(?:证书名称|竞赛名称|大赛名称|比赛名称|获奖大赛|获奖项)$/.test(fieldLabel(field).replace(/[＊*]/g, ''))) {
     const exam = value => String(value || '').match(/CET\s*-?\s*([46])/i)?.[1] || (/英语四级/.test(value) ? '4' : /英语六级/.test(value) ? '6' : '');
     const matches = /证书名称/.test(fieldLabel(field)) && exam(value) ? options.filter(option => exam(option) === exam(value)) : [];
     if (matches.length === 1) return matches[0];
     if (!matches.length && !options.some(option => choiceToken(option).includes(wanted) || wanted.includes(choiceToken(option))))
-      return options.find(option => choiceToken(option) === '其他') || '';
+      return options.find(option => /^(?:其他|其它)$/.test(choiceToken(option))) || '';
   }
   if (/学历类型|受教育类型|培养方式|学习形式|学习方式|就读方式/.test(fieldLabel(field)) && /全日制|统招/.test(value)) {
     const matches = options.filter(option => /非全日制/.test(value) ? /非全日制/.test(option) : /非统招/.test(value) ? choiceToken(option) === wanted : /全日制/.test(option) && !/非全日制/.test(option));
@@ -985,8 +1003,10 @@ const localCandidate = (field, profile) => {
     const matches = category ? options.filter(option => category.test(String(option))) : [];
     return matches.length === 1 ? matches[0] : "";
   }
-  if (/(?:获奖|奖励|奖项|大赛|比赛|竞赛)(?:级别|等级)/.test(fieldLabel(field))) {
+  if (/(?:获奖|奖励|奖项|大赛|比赛|竞赛)(?:级别|等级)|^(?:大赛|竞赛|比赛)成绩$/.test(fieldLabel(field))) {
     const level = String(value || "").trim();
+    const rank = Number(level.match(/^(?:第(\d+)名|top\s*(\d+))$/i)?.slice(1).find(Boolean));
+    if (rank >= 1) return options.map(option=>({option,top:Number(String(option).match(/^top\s*(\d+)$/i)?.[1])})).filter(item=>item.top>=rank).sort((a,b)=>a.top-b.top)[0]?.option || '';
     return options.find(option => choiceToken(option) === choiceToken(level)
       || choiceToken(option).replace(/省级|省区级/g, "省级").replace(/市级|县市级/g, "市级") === choiceToken(level).replace(/省级|省区级/g, "省级").replace(/市级|县市级/g, "市级")) || "";
   }
@@ -1056,9 +1076,15 @@ const retryFieldKeys = (scannedFields, filled) => new Set(filled ? (scannedField
   .filter(Boolean)
   .filter((field) => field.optionSource === "popup" && !field.options?.length && !/日期|时间|年月|date|month/i.test(`${field.type || ""} ${field.label || ""} ${field.ariaLabel || ""} ${field.placeholder || ""}`))
   .map((field) => field.key) : []);
+const projectTextField = (field, profile) => {
+  const sources = profileSources(field, profile);
+  return !!field.rowAnchor && semanticTextField(field) && /^(?:(?:项目)?(?:描述|简介|内容|说明|职责|亮点|成果)|项目中职责|个人工作)$/.test(fieldLabel(field).replace(/[：:]\s*$/, ''))
+    && sources.length > 0 && sources.every(source => /^(?:derived\.)?projects\[\d+\]\./.test(source.path));
+};
 const derivedTextAssignments = (fields, profile) => fields.filter(field => semanticTextField(field) && !field.currentValue && !field.blocked).flatMap(field => {
   const sources = profileSources(field, profile);
   const direct = /^(?:姓名|中文姓名|真实姓名|名字|手机号码|联系电话|邮箱|电子邮箱|邮件地址|学校|院校|学校名称|学校全称|院校名称|就读学校|学院|院系|学院名称|专业|专业名称|所学专业|项目名称|项目标题|技能名称|技能特长|专业技能|技能描述|技能说明|技能详情|公司名称|公司|企业名称|单位名称|所在部门|所属部门|部门|工作岗位|任职职位|任职岗位|实践名称|实践描述|实践内容|实践说明|职务|职位名称|岗位名称|干部职务|担任职务|角色|级别|组织级别|活动级别)$/.test(fieldLabel(field))
+    || /^(?:education\[\d+\]\.(?:honors|awards)|awards\[\d+\]\.description)$/.test(sources[0]?.path || '') && /^(?:荣誉奖项|荣誉奖励|荣誉|获奖情况|奖项说明|获奖说明|获奖描述|奖励描述|荣誉描述)$/.test(fieldLabel(field))
     || /^(?:cadres\[\d+\]\.duty|(?:work|internships|experiences)\[\d+\]\.description)$/.test(sources[0]?.path || '') && /^(?:工作职责|工作描述|校园经历描述)$/.test(fieldLabel(field));
   const examScore = fieldLabel(field) === "考试分数" && field.examValue && /^(?:英语|english)$/i.test(field.languageValue || "")
     && /^certificates\[\d+\]\.score$/.test(sources[0]?.path || "") && /^\d+(?:\.\d+)?$/.test(sources[0]?.value || "");
@@ -1273,6 +1299,7 @@ async function fillPage(tabId) {
     let schema = await page({ type: "GET_FORM_SCHEMA" });
     const modules = [...(schema.modules || []), ...(schema.fields || []).map((field) => field.module || "")];
     profile = { ...profile, separateInternships: modules.some((title) => /实习/.test(title) && !combinedExperience(title)) };
+    profile.separateCadres = modules.some(title => /学生干部经历/.test(title)) && modules.some(title => /社团经历/.test(title));
     profile.separateEnglishCertificates = (schema.fields || []).some((field) => /英语能力|英语证书/.test(field.module || ""));
     const prepared = await page({ type: "PREPARE_PROFILE", profile, corrections: awardNarrativeCorrections(schema.fields || [], profile) });
     const experiences = profile.experiences?.length ? profile.experiences : [...(profile.internships || []), ...(profile.work || [])];
@@ -1282,7 +1309,8 @@ async function fillPage(tabId) {
       internships: profile.separateInternships ? profile.internships?.length : 0,
       certificates: profile.certificates?.length, awards: profile.awards?.length,
       competitions: (profile.awards || []).filter(competitionAward).length, honors: (profile.awards || []).filter(item => !competitionAward(item)).length,
-      skills: profile.skills?.length, cadres: profile.cadres?.length
+      skills: profile.skills?.length, cadres: (profile.cadres || []).filter(row => !profile.separateCadres || String(row.level || '').trim() !== '社团').length,
+      clubs: profile.separateCadres ? (profile.cadres || []).filter(row => String(row.level || '').trim() === '社团').length : 0
     };
     const rowDiagnostics = [], rowStates = new Map(), rowTargets = {...rowCounts};
     let actualRows = {};
@@ -1290,9 +1318,10 @@ async function fillPage(tabId) {
       const counts = {};
       for (const [group, count] of Object.entries(rowCounts)) {
         const groups = group === 'work' && !profile.separateInternships ? ['experiences', 'work', 'internships']
-          : /^(?:competitions|honors)$/.test(group) ? ['awards'] : [group];
+          : /^(?:competitions|honors)$/.test(group) ? ['awards'] : group === 'clubs' ? ['cadres'] : [group];
+        const owns = field => !profile.separateCadres || !groups.includes('cadres') || (/社团/.test(field.module || '') && !/干部/.test(field.module || '')) === (group === 'clubs');
         // Only records present before this fill may increase the source quota.
-        const extra = rowStates.has(group) ? rowTargets[group] - (Number(count) || 0) : (current.fields || []).filter(field => field.rowAnchor && field.rowAnchors?.length).reduce((max, field) => {
+        const extra = rowStates.has(group) ? rowTargets[group] - (Number(count) || 0) : (current.fields || []).filter(field => owns(field) && field.rowAnchor && field.rowAnchors?.length).reduce((max, field) => {
           const anchor = {...field, label:field.rowAnchor.label, rowAnchors:[]};
           const probe = {...anchor, repeatIndex:0, rowAnchor:null, rowDescriptions:[]};
           if (!profileSources(probe, profile).some(source => groups.some(name => source.path.startsWith(`${name}[`)))) return max;
@@ -1301,7 +1330,7 @@ async function fillPage(tabId) {
         }, 0);
         const targetCount = (Number(count) || 0) + extra;
         rowTargets[group] = targetCount;
-        const state = JSON.stringify([targetCount, (current.fields || []).filter(field => profileSources(field, profile)
+        const state = JSON.stringify([targetCount, (current.fields || []).filter(field => owns(field) && profileSources(field, profile)
           .some(source => groups.some(name => source.path.startsWith(`${name}[`))))
           .map(({key, currentValue, blocked}) => [key, currentValue, blocked])]);
         if (count && rowStates.get(group) !== state) { counts[group] = targetCount; rowStates.set(group, state); }
@@ -1313,32 +1342,39 @@ async function fillPage(tabId) {
     };
     await ensureProfileRows(schema);
     schema = await page({ type: "GET_FORM_SCHEMA" });
-    let emptyFields = uniqueEmptyFields(schema.fields || []);
+    let emptyFields = uniqueEmptyFields(schema.fields || [], profile);
     const parentReady = field => !field.dependsOn || schema.fields.some(parent => parent.key === field.dependsOn && parent.currentValue);
     let candidateFilled = prepared.filled || 0; let aiFilled = 0;
     const aiDiagnostics = [{ pass: 0, fields: [], model: [], apply: prepared.diagnostics || [] }];
     let aiConfiguration;
     let aiUnavailable;
-    const match = async (fields, timeoutMs) => {
+    const aiBudgetMs = 120000;
+    let aiElapsedMs = 0;
+    // ponytail: all model calls are serial; cap added AI wait, not DOM interaction time.
+    const match = async fields => {
       if (aiUnavailable) throw Object.assign(new Error('AI unavailable in this fill'), { code:'previous-failure', blockedBy:aiFailureReason(aiUnavailable) });
+      const started = Date.now();
       try {
         if (!aiConfiguration) aiConfiguration = (async () => {
           const begin = Date.now();
           try {
             const { aiConfig } = await chrome.storage.local.get("aiConfig");
             if (!aiConfig?.apiKey) throw Object.assign(new Error("请先保存 AI 配置。当前已完成的结构化填充会保留。"), {code:'config-missing'});
-            const configured = await fetch(`${proxyUrl}/config`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aiConfig), signal:AbortSignal.timeout(10000) });
+            const configured = await fetch(`${proxyUrl}/config`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aiConfig), signal:AbortSignal.timeout(3000) });
             if (!configured.ok) throw Object.assign(new Error("本地 AI 代理配置失败，请检查侧栏配置。"), {code:'config-failed'});
           } finally { phases.aiConfig = { count:1, durationMs:Date.now() - begin }; }
         })();
         await aiConfiguration;
-        const request = { keys: fields.map(field => field.key), sourcePaths: fields.map(field => ({key:field.key, paths:profileSources(field, profile).map(source => source.path)})), timeoutMs:timeoutMs || 10000 };
+        const timeoutMs = Math.min(AI_MATCH_TIMEOUT_MS, aiBudgetMs - aiElapsedMs - (Date.now() - started));
+        if (timeoutMs < 1000) throw Object.assign(new Error('AI wait budget exhausted in this fill'), {code:'budget-exhausted'});
+        const request = { keys: fields.map(field => field.key), sourcePaths: fields.map(field => ({key:field.key, paths:profileSources(field, profile).map(source => source.path)})), timeoutMs };
         aiRequests.push(request);
         const begin = Date.now();
         try { const result = await semanticMatch(fields, profile, timeoutMs); request.reason = 'completed'; return result; }
         catch (error) { request.reason = aiFailureReason(error); throw error; }
         finally { request.durationMs = Date.now() - begin; }
       } catch (error) { aiUnavailable = error; throw error; }
+      finally { aiElapsedMs += Date.now() - started; }
     };
     // After source-verified repairs, plan the ordinary fill. Plain text does not need
     // a popup, so AI can resolve unfamiliar captions before fuzzy rules run.
@@ -1346,15 +1382,11 @@ async function fillPage(tabId) {
       blocked: !!field.blocked, protected: !!field.currentValue, structure: field.structure, sourcePaths: profileSources(field, profile).map(({ path }) => path) }));
     const categories = emptyFields.filter(field => occupationCategoryField(field) && !field.blocked && parentReady(field) && profileSources(field, profile).length);
     const categoryKeys = new Set(categories.map(field => field.key));
-    let categoryMatch;
     let categoryFields = [];
     if (categories.length) {
       const live = await page({type:"GET_LIVE_OPTIONS",keys:categories.map(field => field.key)});
-      categoryFields = uniqueEmptyFields(live.fields || []).filter(field => occupationCategoryField(field) && field.options?.length);
-      // Network classification can run while local fields fill; page clicks stay serial.
-      if (categoryFields.length) categoryMatch = match(categoryFields, 60000)
-        .then(result => ({result}), error => ({error}));
-      else aiDiagnostics.push({pass:0, fields:[], model:categories.map(field => ({key:field.key,label:field.label,reason:'candidate-not-read'})), apply:[]});
+      categoryFields = uniqueEmptyFields(live.fields || [], profile).filter(field => occupationCategoryField(field) && field.options?.length);
+      if (!categoryFields.length) aiDiagnostics.push({pass:0, fields:[], model:categories.map(field => ({key:field.key,label:field.label,reason:'candidate-not-read'})), apply:[]});
     }
     const preflightFields = emptyFields.filter((field) => !field.blocked && semanticTextField(field) && !field.dependsOn
       && !/日期|时间|年月|date|month/i.test(`${field.type} ${field.label} ${field.type === "textarea" ? "" : field.placeholder}`) && profileSources(field, profile).length);
@@ -1372,17 +1404,18 @@ async function fillPage(tabId) {
     const unknownText = preflightFields.filter(field => !derivedKeys.has(field.key)
       && !(field.rowAnchor && /^(?:工作描述|工作职责)$/.test(fieldLabel(field))
         && profileSources(field, profile).every(source => /^(?:work|internships|experiences)\[\d+\]\.(?:description|highlights)$/.test(source.path)))
-      && !(field.rowAnchor && /^(?:项目描述|项目简介|项目职责)$/.test(fieldLabel(field))
-        && profileSources(field, profile).every(source => /^projects\[\d+\]\./.test(source.path))));
-    if (unknownText.length) {
+      && !projectTextField(field, profile));
+    const preflightMatch = [...categoryFields, ...unknownText];
+    if (preflightMatch.length) {
+      let result;
       try {
-        const result = await match(unknownText);
-        const applied = await page({ type: "APPLY_ASSIGNMENTS", assignments: result.assignments });
-        aiFilled += applied.filled || 0;
-        aiDiagnostics.push({ pass: 0, fields: [], model: result.diagnostics || [], apply: applied.diagnostics || [] });
+        result = await match(preflightMatch);
       } catch (error) {
-        aiDiagnostics.push({ pass: 0, fields: [], model: unknownText.map(field => ({ key:field.key, label:field.label, reason:aiFailureReason(error), blockedBy:error.blockedBy })), apply: [] });
+        result = { assignments: [], diagnostics: preflightMatch.map(field => ({ key:field.key, label:field.label, reason:aiFailureReason(error), blockedBy:error.blockedBy })) };
       }
+      const applied = result.assignments.length ? await page({ type: "APPLY_ASSIGNMENTS", assignments: result.assignments }) : {};
+      aiFilled += applied.filled || 0;
+      aiDiagnostics.push({ pass: 0, fields: categoryFields.map(({key,label,options,optionCount,optionSource,candidatesTruncated,opening}) => ({key,label,options,optionCount,optionSource,candidatesTruncated,opening})), model: result.diagnostics || [], apply: applied.diagnostics || [] });
     }
     const repaired = await page({ type: "FILL_PROFILE", profile, options: { onlyEmpty: true, deferChoices: true, rowsPrepared: true } });
     const repairAddedRows = async () => {
@@ -1412,7 +1445,7 @@ async function fillPage(tabId) {
       return allAdded;
     };
     await repairAddedRows();
-    emptyFields = uniqueEmptyFields(schema.fields || []);
+    emptyFields = uniqueEmptyFields(schema.fields || [], profile);
     // Reread only children and unavailable choices after a real selection.
     let retryKeys;
     const retriedChoices = new Set();
@@ -1424,7 +1457,7 @@ async function fillPage(tabId) {
         && !missingLocalValue(field, profile) && (hasProfileContext(field, profile) || profileSources(field, profile).length));
       const live = eligible.length ? await page({ type: "GET_LIVE_OPTIONS", keys: eligible.map((field) => field.key) }) : { fields: [] };
       const eligibleKeys = new Set(eligible.map((field) => field.key));
-      const scannedFields = uniqueEmptyFields(live.fields || []).filter((field) => eligibleKeys.has(field.key));
+      const scannedFields = uniqueEmptyFields(live.fields || [], profile).filter((field) => eligibleKeys.has(field.key));
       const liveFields = scannedFields.filter((field) => semanticTextField(field) || fieldsWithLiveOptions([field]).length || field.hasSearch).map((field) => ({ ...field, profileContext: aiFieldContext(field, profile) }));
       const absentFields = passFields.filter((field) => field.blocked || !parentReady(field) || missingLocalValue(field, profile) || !profileSources(field, profile).length && !hasProfileContext(field, profile));
       const baseDiagnostics = absentFields.map((field) => ({ key: field.key, label: field.label, optionCount: 0, optionSource: "not-requested", reason: field.blocked ? "dependent-field-blocked" : !parentReady(field) ? "choice-parent-not-confirmed" : "profile-value-missing" }));
@@ -1438,7 +1471,7 @@ async function fillPage(tabId) {
       const local = await page({ type: "APPLY_ASSIGNMENTS", assignments: [...localAssignments, ...directSearch] });
       candidateFilled += local.filled || 0;
       const locallyFilled = new Set((local.diagnostics || []).filter((item) => item.reason === "filled").map((item) => item.key));
-      const aiFields = liveFields.filter((field) => !isAnnualSalaryField(field) && !locallyFilled.has(field.key) && !localCascadeKeys.has(field.key)
+      const aiFields = liveFields.filter((field) => !isAnnualSalaryField(field) && !projectTextField(field, profile) && !locallyFilled.has(field.key) && !localCascadeKeys.has(field.key)
         && (semanticTextField(field) || field.options?.length));
       let result = { assignments: [], diagnostics: [] };
       if (aiFields.length) {
@@ -1477,7 +1510,7 @@ async function fillPage(tabId) {
           const pending = (step.diagnostics || []).find((item) => item.reason === "cascade-parent-selected");
           if (!pending) { appendApplied(step, assignment.local ? new Set() : new Set([assignment.key])); break; }
           const children = await page({ type: "GET_LIVE_OPTIONS", keys: [assignment.key], keepOpen: true, previousOptions: { [assignment.key]: [...seenOptions] } });
-          const child = uniqueEmptyFields(children.fields || []).find((item) => item.key === assignment.key);
+          const child = uniqueEmptyFields(children.fields || [], profile).find((item) => item.key === assignment.key);
           const options = cascadeChildOptions(child?.options, seenOptions);
           pending.cascade = { level, options: field?.options || [], selected: assignment.value, childOptionsUpdated: !!options.length, childOptions: options };
           appendApplied(step, assignment.local ? new Set() : new Set([assignment.key]));
@@ -1524,23 +1557,16 @@ async function fillPage(tabId) {
         passLimit = Math.min(passLimit + 3, rowPassLimit);
       }
       if (!selected) schema = await page({ type: "GET_FORM_SCHEMA" });
-      emptyFields = uniqueEmptyFields(schema.fields || []).filter((field) => !missingLocalValue(field, profile));
+      emptyFields = uniqueEmptyFields(schema.fields || [], profile).filter((field) => !missingLocalValue(field, profile));
       const scannedKeys = new Set(scannedFields.map((field) => field.key));
       for (const field of emptyFields) if (!field.blocked && field.dependsOn && !scannedKeys.has(field.key)
         && schema.fields.some((parent) => parent.key === field.dependsOn && parent.currentValue)) retryKeys.add(field.key);
       if (retryKeys.size && (local.filled || 0) + (applied.filled || 0) > 0) passLimit = Math.min(passLimit + 1, rowPassLimit);
       if (!retryKeys.size) break;
     }
-    if (categoryMatch) {
-      const {result, error} = await categoryMatch;
-      const applied = error ? {} : await page({type:"APPLY_ASSIGNMENTS",assignments:result.assignments});
-      aiFilled += applied.filled || 0;
-      aiDiagnostics.push({pass:0,fields:categoryFields.map(({key,label,options,optionCount,optionSource,candidatesTruncated,opening}) => ({key,label,options,optionCount,optionSource,candidatesTruncated,opening})),
-        model:error ? categories.map(field => ({key:field.key,label:field.label,reason:aiFailureReason(error),blockedBy:error.blockedBy})) : result.diagnostics || [],apply:applied.diagnostics || []});
-    }
     const after = await page({ type: "GET_FORM_SCHEMA" });
     const readback = appliedTargets.size ? await page({ type:'VERIFY_TARGETS', targets:[...appliedTargets.values()] }) : { targets:[] };
-    const remaining = uniqueEmptyFields(after.fields || []);
+    const remaining = uniqueEmptyFields(after.fields || [], profile);
     const examples = [...new Set(remaining.map(fieldLabel).filter(Boolean))].slice(0, 4).join("、");
     const { unresolved, unavailable } = missingFieldLabels(repaired.missingFields, after.fields);
     const unresolvedText = unresolved.slice(0, 6).join("、");
@@ -1558,22 +1584,30 @@ async function fillPage(tabId) {
       stage: item.stage || stageFor(item.reason || ""), reason: item.reason, blockedBy:item.blockedBy, optionCount: item.optionCount,
       candidatesTruncated: aiDiagnostics.flatMap(pass => pass.fields || []).find(field => field.key === item.key)?.candidatesTruncated,
       interaction: item.choice?.failure, repair: item.repair, path: item.choice?.path, dateControlCount: item.dateControlCount,
+      optionClick: item.choice?.optionClick ? { trusted: item.choice.optionClick.trusted === true, fallback: item.choice.optionClick.fallback === true, delivered: item.choice.optionClick.delivered === true,
+        retried: item.choice.optionClick.retried === true, plain: item.choice.optionClick.plainTrusted === true,
+        targetTag: item.choice.optionClick.targetTag,
+        reason: item.choice.optionClick.trustedError ? ['target-not-at-point', 'trusted-click-not-observed'].includes(item.choice.optionClick.trustedError) ? item.choice.optionClick.trustedError : 'native-click-failed' : undefined } : undefined,
+      displayBeforeDismiss: item.choice?.displayBeforeDismiss,
+      popupLinked: item.choice?.popupLinked,
       sourceSelection: item.choice?.sourceSelection, sourceCount: item.choice?.sourceCount,
       anchor: item.anchor, requested: item.requested, initial: item.initial, final: item.final, clicks: item.clicks, durationMs: item.durationMs,
       button: item.button, module: item.module, click: item.click,
       fields: item.stage === 'rows' ? item.fields : undefined, candidates: item.stage === 'rows' ? item.candidates : undefined,
       tree: safeTree(item.choice?.tree),
+      treeNavigation: item.choice?.tree?.navigation?.map(({ level, expanded, trusted, fallback, delivered, trustedError }) => ({ level, expanded: expanded === true, trusted: trusted === true, fallback: fallback === true, delivered: delivered === true,
+        reason: trustedError ? ['target-not-at-point', 'trusted-click-not-observed'].includes(trustedError) ? trustedError : 'native-click-failed' : undefined })),
       parts: item.choice?.parts?.map(({ confirmed, protected: protectedValue, choice }) => ({ confirmed, protected: protectedValue,
         path: choice?.path, interaction: choice?.failure, tree: safeTree(choice?.tree) })),
       opening: item.opening || item.choice?.opening || aiDiagnostics.flatMap(pass => pass.fields || []).find(field => field.key === item.key)?.opening,
-      datePicker: item.choice?.datePicker ? { currentYear: item.choice.datePicker.currentYear, targetYear: item.choice.datePicker.targetYear, yearMethod: item.choice.datePicker.yearMethod, monthCount: item.choice.datePicker.monthCount, rangeStartPending: !!item.choice.rangeStartPending } : undefined,
+      datePicker: item.choice?.datePicker ? { currentYear: item.choice.datePicker.currentYear, targetYear: item.choice.datePicker.targetYear, yearMethod: item.choice.datePicker.yearMethod, monthCount: item.choice.datePicker.monthCount, proxy: item.choice.datePicker.proxy === true, rangeStartPending: !!item.choice.rangeStartPending } : undefined,
       yearNavigation: item.choice?.datePicker?.yearClicks?.map(({ trusted, fallback, trustedError }) => ({ trusted, fallback, trustedError })) });
     const diagnostics = [...allDiagnostics.structured, ...rowDiagnostics, ...aiDiagnostics.flatMap((pass) => [...pass.model, ...pass.apply]),
       ...(readback.targets || []).filter(item => !item.confirmed).map(item => ({key:item.key,label:item.label,stage:'readback',reason:'final-value-not-confirmed'}))].map(safeDiagnostic);
-    const lastAiDiagnostics = { protocol: 100, version: "0.9.103", build: "100-add-entry-owner", tabId: tab.id, frameId: target.frameId, discovered: after.fields?.length || 0, structuredFilled: repaired.filled,
+    const lastAiDiagnostics = { protocol: 100, version: "0.9.103", build: "100-tree-child-load", contentBuild: after.build, tabId: tab.id, frameId: target.frameId, discovered: after.fields?.length || 0, structuredFilled: repaired.filled,
       candidateFilled, aiFilled, protected: plan.filter(field => field.protected).length, remaining: remaining.length,
       readback: { expected:appliedTargets.size, confirmed:(readback.targets || []).filter(item => item.confirmed).length, unconfirmed:(readback.targets || []).filter(item => !item.confirmed).map(({key,label}) => ({key,label})) },
-      timing: { totalMs:Date.now() - started, phases, aiRequests, candidatePasses:aiDiagnostics.filter(pass => pass.pass > 0).length, rowClicks:rowDiagnostics.reduce((sum, item) => sum + (item.clicks || 0), 0) },
+      timing: { totalMs:Date.now() - started, phases, aiRequests, aiBudgetMs, aiElapsedMs, candidatePasses:aiDiagnostics.filter(pass => pass.pass > 0).length, rowClicks:rowDiagnostics.reduce((sum, item) => sum + (item.clicks || 0), 0) },
       rows: { requested: rowCounts, target:rowTargets, present: actualRows }, plan,
       remainingFields: remaining.map(field => ({ key: field.key, label: field.label, module: field.module, row: field.repeatIndex, structure: field.structure, reason: !profileSources(field, profile).length && !hasProfileContext(field, profile) ? "profile-value-missing" : [...diagnostics].reverse().find(item => item.key === field.key)?.reason || "not-confirmed",
         firstFailure:diagnostics.find(item => item.key === field.key && !['filled','accepted','page-value-protected','deferred-to-ai','cascade-parent-selected'].includes(item.reason)) })), diagnostics };
@@ -1642,7 +1676,7 @@ const MANUAL_SINGLE_FIELD_IDS = [
   "wechat", "nationality", "countryRegion", "politicalStatus", "currentResidence", "householdRegistration", "workExperience", "intentIndustry", "intentOccupation", "intentCurrentSalary", "intentExpectedSalary", "intentCity", "intentArrival", "selfEvaluation"
 ];
 const REPEAT_GROUPS = {
-  educations: { firstId: "university", label: "教育经历", addLabel: "新增教育经历", fields: [["degree", "education"], ["training", "educationType"], ["school", "university"], ["location", "educationLocation"], ["college", "college"], ["major", "major"], ["start", "educationStart"], ["end", "graduationYear"], ["gpa", "gpa"], ["gpaType", "gpaType"], ["rank", "educationRank"]] },
+  educations: { firstId: "university", label: "教育经历", addLabel: "新增教育经历", fields: [["degree", "education"], ["training", "educationType"], ["school", "university"], ["location", "educationLocation"], ["college", "college"], ["major", "major"], ["start", "educationStart"], ["end", "graduationYear"], ["gpa", "gpa"], ["gpaType", "gpaType"], ["rank", "educationRank"], ["honors", "educationHonors"]] },
   experiences: { firstId: "internCompany1", label: "经历", addLabel: "新增实习/工作经历", fields: [["company", "internCompany"], ["department", "internDepartment"], ["title", "internPosition"], ["start", "internStart"], ["end", "internEnd"], ["salary", "internSalary"], ["location", "internLocation"], ["reason", "internReason"], ["description", "internContent"], ["highlights", "internHighlights"]] },
   projects: { firstId: "projectName1", label: "项目", addLabel: "新增项目", fields: [["name", "projectName"], ["role", "projectRole"], ["start", "projectStart"], ["end", "projectEnd"], ["link", "projectLink"], ["description", "projectDesc"], ["responsibilities", "projectDuty"], ["outcomes", "projectOutcomes"]] },
   cadres: { firstId: "cadrePosition1", label: "干部经历", addLabel: "新增干部经历", fields: [["position", "cadrePosition"], ["level", "cadreLevel"], ["start", "cadreStart"], ["end", "cadreEnd"], ["duty", "cadreDuty"]] },
@@ -1796,7 +1830,7 @@ function setupRepeatableForms() {
 }
 
 function repeatRowsFromData(data, groupName) {
-  if (Array.isArray(data?.[groupName])) return data[groupName];
+  if (Array.isArray(data?.[groupName])) return groupName === 'projects' ? data[groupName].map(row => ({ ...row, outcomes: row?.outcomes || row?.highlights || '' })) : data[groupName];
   if (groupName === "skills") return data?.skills ? skillsFromText(data.skills) : [];
   if (groupName === "certificates" && Array.isArray(data?.languages)) return data.languages.filter((row) => row?.name || row?.score || row?.date);
   const row = Object.fromEntries(REPEAT_GROUPS[groupName].fields.map(([key, prefix]) => [key, data?.[`${prefix}1`] ?? data?.[prefix] ?? ""]));

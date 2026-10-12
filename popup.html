@@ -75,6 +75,7 @@
           <label>GPA<input id="gpa" type="text" inputmode="decimal" placeholder="仅填绩点，例如：3.8"></label>
           <label>GPA类型（满分制）<input id="gpaType" type="text" placeholder="例如：5分制"></label>
           <label>成绩排名<select id="educationRank"><option value="">请选择</option><option>前10%</option><option>前15%</option><option>前20%</option><option>前25%</option><option>前30%</option><option>前35%</option><option>前40%</option><option>前50%</option><option>其他</option></select></label>
+          <label class="wide">荣誉奖项<textarea id="educationHonors" placeholder="属于这条教育经历的荣誉或奖项"></textarea></label>
           </div>
         </details>
       </section>
@@ -122,13 +123,14 @@
             <label>项目链接<input id="projectLink1" type="url" placeholder="例如：https://github.com/example/project"></label>
             <label class="wide">项目描述<textarea id="projectDesc1" placeholder="项目背景、目标等…"></textarea></label>
             <label class="wide">职责<textarea id="projectDuty1" placeholder="你负责的具体工作…"></textarea></label>
-            <label class="wide">项目成果<textarea id="projectOutcomes1" placeholder="项目已实现的成果；部分招聘网站必填"></textarea></label>
+            <label class="wide">项目亮点<textarea id="projectOutcomes1" placeholder="项目中的关键优化、已实现的功能等…"></textarea></label>
           </div>
         </details>
       </section>
 
       <section>
         <h2><span aria-hidden="true">🏛️</span>学生干部经历</h2>
+        <p class="hint">网页将干部和社团经历分开时，级别选“社团”的记录会填入社团经历。</p>
         <details class="experience" open>
           <summary><span class="record-heading"><strong>干部经历 1</strong><span class="record-title">未填写名称</span></span><span class="record-toggle" aria-hidden="true">⌄</span></summary>
           <div class="form-grid">
